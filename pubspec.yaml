@@ -1,0 +1,15 @@
+name: nirvana_solana
+description: Dart client library for interacting with Nirvana V2 protocol on Solana blockchain
+version: 0.1.0
+homepage: https://github.com/yourusername/nirvana_solana
+
+environment:
+  sdk: ^3.7.2
+
+dependencies:
+  solana: ^0.31.2
+  equatable: ^2.0.5
+
+dev_dependencies:
+  test: ^1.24.0
+  lints: ^3.0.0
