@@ -9,6 +9,7 @@ export 'src/models/config.dart';
 export 'src/models/prices.dart';
 export 'src/models/personal_account_info.dart';
 export 'src/models/transaction_result.dart';
+export 'src/models/transaction_price_result.dart';
 export 'src/models/requests/buy_ana_request.dart';
 export 'src/models/requests/sell_ana_request.dart';
 export 'src/models/requests/stake_ana_request.dart';

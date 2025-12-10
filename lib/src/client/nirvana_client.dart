@@ -1,6 +1,6 @@
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
-import 'dart:math' as math;
 import 'package:solana/solana.dart';
 import 'package:solana/encoder.dart';
 
@@ -8,6 +8,7 @@ import '../models/config.dart';
 import '../models/prices.dart';
 import '../models/personal_account_info.dart';
 import '../models/transaction_result.dart';
+import '../models/transaction_price_result.dart';
 import '../models/requests/buy_ana_request.dart';
 import '../models/requests/sell_ana_request.dart';
 import '../models/requests/stake_ana_request.dart';
@@ -18,6 +19,11 @@ import '../accounts/account_resolver.dart';
 /// Main client for interacting with Nirvana V2 protocol
 class NirvanaClient {
   static const List<int> _tenantDiscriminator = [61, 43, 215, 51, 232, 242, 209, 170];
+
+  static const String _anaMint = '5DkzT65YJvCsZcot9L6qwkJnsBCPmKHjJz3QU7t7QeRW';
+  static const String _nirvMint = '3eamaYJ7yicyRd3mYz4YeNyNPGVo6zMmKUp5UP25AxRM';
+  static const String _usdcMint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+  static const String _pranaMint = 'CLr7G2af9VSfH1PFZ5fYvB8WK1DTgE85qrVjpa8Xkg4N';
 
   final SolanaRpcClient _rpcClient;
   final NirvanaTransactionBuilder _transactionBuilder;
@@ -42,19 +48,386 @@ class NirvanaClient {
   }
 
   /// Fetches current ANA token prices from the Nirvana V2 protocol
+  /// Uses transaction-based price for ANA and on-chain calculation for floor
   Future<NirvanaPrices> fetchPrices() async {
     try {
-      final accountData = await _fetchTenantAccountData();
-      final prices = _calculatePrices(accountData);
+      final transactionPrice = await fetchLatestAnaPrice();
+      final floorPrice = await fetchFloorPrice();
+
+      final ana = transactionPrice.price;
+      final floor = floorPrice;
+      final prana = ana - floor;
+
       return NirvanaPrices(
-        anaMarket: prices.anaMarket,
-        anaFloor: prices.anaFloor,
-        prana: prices.prana,
+        ana: ana,
+        floor: floor,
+        prana: prana,
         lastUpdated: DateTime.now().toUtc(),
       );
     } catch (e) {
       throw Exception('Failed to fetch Nirvana prices: $e');
     }
+  }
+
+  /// Fetches the floor price from on-chain data
+  Future<double> fetchFloorPrice() async {
+    final priceCurveData = await _fetchPriceCurveAccountData();
+    return _decodeFloorPriceFromPriceCurve(priceCurveData);
+  }
+
+  /// Fetches the latest ANA price from a recent buy/sell transaction
+  /// [maxTxToCheck] - Maximum number of transactions to check
+  /// [delayMs] - Delay between RPC calls in milliseconds to avoid rate limiting
+  /// [maxRetries] - Maximum retries per transaction on rate limit errors
+  Future<TransactionPriceResult> fetchLatestAnaPrice({
+    int maxTxToCheck = 20,
+    int delayMs = 2000,
+    int maxRetries = 3,
+  }) async {
+    try {
+      final signatures = await _rpcClient.getSignaturesForAddress(
+        _config.programId,
+        limit: 100,
+      );
+
+      int txIndex = 0;
+      int txChecked = 0;
+      int retryCount = 0;
+
+      while (txIndex < signatures.length && txChecked < maxTxToCheck) {
+        final sig = signatures[txIndex];
+
+        try {
+          if (txChecked > 0 && delayMs > 0) {
+            await Future.delayed(Duration(milliseconds: delayMs));
+          }
+
+          final result = await _parseTransactionPrice(sig);
+          return result;
+        } catch (e) {
+          final errorMsg = e.toString();
+
+          // Handle rate limiting with retry
+          if (errorMsg.contains('429') && retryCount < maxRetries) {
+            retryCount++;
+            await Future.delayed(const Duration(seconds: 10));
+            // Don't increment txIndex or txChecked - retry same transaction
+            continue;
+          }
+
+          // Reset retry count and move to next transaction
+          retryCount = 0;
+          txIndex++;
+          txChecked++;
+        }
+      }
+
+      throw Exception('No recent ANA buy/sell transactions found');
+    } catch (e) {
+      throw Exception('Failed to fetch latest ANA price: $e');
+    }
+  }
+
+  /// Parses a transaction to extract ANA price
+  /// Ported from companion's get_price_from_transaction.dart
+  Future<TransactionPriceResult> _parseTransactionPrice(String signature) async {
+    final txData = await _rpcClient.getTransaction(signature);
+
+    final meta = txData['meta'] as Map<String, dynamic>?;
+    if (meta == null) {
+      throw Exception('Transaction metadata not found');
+    }
+
+    if (meta['err'] != null) {
+      throw Exception('Transaction failed');
+    }
+
+    // Get account keys to identify user address
+    final transaction = txData['transaction'] as Map<String, dynamic>?;
+    final message = transaction?['message'] as Map<String, dynamic>?;
+    final accountKeys = message?['accountKeys'] as List? ?? [];
+
+    String? userAddress;
+    if (accountKeys.isNotEmpty) {
+      final firstKey = accountKeys[0];
+      userAddress = firstKey is String ? firstKey : firstKey['pubkey'];
+    }
+
+    // Parse instructions to find burn/mint/transfer operations
+    final instructions = message?['instructions'] as List? ?? [];
+    final innerInstructions = meta['innerInstructions'] as List? ?? [];
+
+    // Collect all instructions (both top-level and inner)
+    List<Map<String, dynamic>> allInstructions = [];
+    for (final instruction in instructions) {
+      allInstructions.add(instruction as Map<String, dynamic>);
+    }
+    for (final inner in innerInstructions) {
+      final innerList = inner['instructions'] as List? ?? [];
+      for (final instruction in innerList) {
+        allInstructions.add(instruction as Map<String, dynamic>);
+      }
+    }
+
+    // Track burn/mint changes separately for accurate pricing
+    Map<String, double> burnMintChanges = {};
+    Map<String, double> feeChanges = {};
+
+    const String tenantFeeAccount = '42rJYSmYHqbn5mk992xAoKZnWEiuMzr6u6ydj9m8fAjP';
+
+    for (final instruction in allInstructions) {
+      if (instruction['program'] != 'spl-token') continue;
+
+      final parsed = instruction['parsed'];
+      if (parsed == null) continue;
+
+      final type = parsed['type'] as String?;
+      final info = parsed['info'] as Map<String, dynamic>?;
+      if (info == null) continue;
+
+      if (type == 'burn') {
+        final mint = info['mint'] as String?;
+        final amount = info['amount'] as String?;
+        final authority = info['authority'] as String?;
+        if (mint != null && amount != null && authority != null) {
+          final rawAmount = int.parse(amount);
+          final uiAmount = rawAmount / 1000000.0; // 6 decimals
+          burnMintChanges['burn_${mint}_$authority'] = -uiAmount;
+        }
+      } else if (type == 'mint' || type == 'mintTo') {
+        final mint = info['mint'] as String?;
+        final amount = info['amount'] as String?;
+        final account = info['account'] as String?;
+        if (mint != null && amount != null) {
+          final rawAmount = int.parse(amount);
+          final uiAmount = rawAmount / 1000000.0;
+          burnMintChanges['mint_${mint}_$account'] = uiAmount;
+        }
+      } else if (type == 'transfer' || type == 'transferChecked') {
+        final destination = info['destination'] as String?;
+        final authority = info['authority'] as String?;
+        String? mint = info['mint'] as String?;
+        double? uiAmount;
+
+        if (type == 'transferChecked') {
+          final tokenAmount = info['tokenAmount'] as Map<String, dynamic>?;
+          uiAmount = tokenAmount?['uiAmount'] as double?;
+        }
+
+        // Track fee transfers to tenant fee account
+        if (mint != null && uiAmount != null && authority != null) {
+          if (destination == tenantFeeAccount) {
+            feeChanges['fee_${mint}_$authority'] = -uiAmount;
+          }
+        }
+      }
+    }
+
+    // Extract token balance changes
+    final preTokenBalances = meta['preTokenBalances'] as List? ?? [];
+    final postTokenBalances = meta['postTokenBalances'] as List? ?? [];
+
+    final allChanges = _extractBalanceChanges(preTokenBalances, postTokenBalances);
+
+    final tenantChanges = allChanges.where((c) => c['owner'] == _config.tenantAccount).toList();
+    final userChanges = allChanges.where((c) => c['owner'] != _config.tenantAccount).toList();
+
+    // Check if prANA is involved - skip if so (these are staking operations)
+    final pranaUserChange = _getChangeForMint(userChanges, _pranaMint);
+    final pranaTenantChange = _getChangeForMint(tenantChanges, _pranaMint);
+    if (pranaUserChange != 0.0 || pranaTenantChange != 0.0) {
+      throw Exception('prANA involved - not a buy/sell transaction');
+    }
+
+    // Get balance changes
+    double anaUserChange = _getChangeForMint(userChanges, _anaMint);
+    double nirvUserChange = _getChangeForMint(userChanges, _nirvMint);
+    double usdcUserChange = _getChangeForMint(userChanges, _usdcMint);
+
+    // Fall back to instruction-based changes if balance changes are 0
+    if (anaUserChange == 0.0) {
+      for (final entry in burnMintChanges.entries) {
+        if (entry.key.contains(_anaMint)) {
+          anaUserChange += entry.value;
+        }
+      }
+    }
+
+    if (nirvUserChange == 0.0) {
+      for (final entry in burnMintChanges.entries) {
+        if (entry.key.contains(_nirvMint)) {
+          nirvUserChange += entry.value;
+        }
+      }
+    }
+
+    if (usdcUserChange == 0.0) {
+      for (final entry in burnMintChanges.entries) {
+        if (entry.key.contains(_usdcMint)) {
+          usdcUserChange += entry.value;
+        }
+      }
+    }
+
+    // Calculate burn/mint amounts for pricing
+    double anaBurnMint = 0.0;
+    double nirvBurnMint = 0.0;
+    for (final entry in burnMintChanges.entries) {
+      if (entry.key.contains(_anaMint)) {
+        anaBurnMint += entry.value;
+      } else if (entry.key.contains(_nirvMint)) {
+        nirvBurnMint += entry.value;
+      }
+    }
+
+    // Calculate fee amounts
+    double anaFee = 0.0;
+    for (final entry in feeChanges.entries) {
+      if (entry.key.contains(_anaMint)) {
+        anaFee += entry.value.abs();
+      }
+    }
+
+    // Determine direction from burn/mint if available, otherwise from balance
+    final anaChange = anaBurnMint != 0.0 ? anaBurnMint : anaUserChange;
+
+    if (anaChange == 0.0) {
+      throw Exception('No ANA balance change detected');
+    }
+
+    double pricePerAna;
+    double paymentAmount;
+    String currency;
+
+    if (anaChange > 0) {
+      // Minted ANA = BUY transaction
+      final anaAmount = anaChange;
+      if (nirvUserChange < 0 || nirvBurnMint < 0) {
+        paymentAmount = (nirvBurnMint != 0.0 ? nirvBurnMint.abs() : nirvUserChange.abs());
+        currency = 'NIRV';
+      } else if (usdcUserChange < 0) {
+        paymentAmount = usdcUserChange.abs();
+        currency = 'USDC';
+      } else {
+        throw Exception('Could not determine payment currency for buy');
+      }
+      pricePerAna = paymentAmount / anaAmount;
+    } else {
+      // Burned ANA = SELL transaction
+      final anaAmount = anaChange.abs();
+      if (nirvUserChange > 0 || nirvBurnMint > 0) {
+        paymentAmount = (nirvBurnMint != 0.0 ? nirvBurnMint : nirvUserChange);
+        currency = 'NIRV';
+      } else if (usdcUserChange > 0) {
+        paymentAmount = usdcUserChange;
+        currency = 'USDC';
+      } else {
+        throw Exception('Could not determine received currency for sell');
+      }
+      pricePerAna = paymentAmount / anaAmount;
+    }
+
+    return TransactionPriceResult(
+      price: pricePerAna,
+      transaction: signature,
+      fee: anaFee,
+      currency: currency,
+    );
+  }
+
+  List<Map<String, dynamic>> _extractBalanceChanges(
+    List<dynamic> preTokenBalances,
+    List<dynamic> postTokenBalances,
+  ) {
+    final List<Map<String, dynamic>> changes = [];
+    final Set<int> processedIndices = {};
+
+    for (final preBalance in preTokenBalances) {
+      final accountIndex = preBalance['accountIndex'] as int;
+      final mint = preBalance['mint'] as String;
+      processedIndices.add(accountIndex);
+
+      final postBalance = postTokenBalances.firstWhere(
+        (pb) => pb['accountIndex'] == accountIndex,
+        orElse: () => null,
+      );
+
+      if (postBalance == null) continue;
+
+      final preAmount = double.parse(preBalance['uiTokenAmount']['uiAmountString'] ?? '0');
+      final postAmount = double.parse(postBalance['uiTokenAmount']['uiAmountString'] ?? '0');
+      final change = postAmount - preAmount;
+
+      if (change.abs() < 0.000001) continue;
+
+      changes.add({
+        'mint': mint,
+        'change': change,
+        'owner': preBalance['owner'] ?? 'unknown',
+      });
+    }
+
+    // Check for new accounts (in post but not in pre)
+    for (final postBalance in postTokenBalances) {
+      final accountIndex = postBalance['accountIndex'] as int;
+      if (processedIndices.contains(accountIndex)) continue;
+
+      final mint = postBalance['mint'] as String;
+      final postAmount = double.parse(postBalance['uiTokenAmount']['uiAmountString'] ?? '0');
+
+      if (postAmount.abs() < 0.000001) continue;
+
+      changes.add({
+        'mint': mint,
+        'change': postAmount,
+        'owner': postBalance['owner'] ?? 'unknown',
+      });
+      processedIndices.add(accountIndex);
+    }
+
+    // Check for closed accounts (in pre but not in post)
+    for (final preBalance in preTokenBalances) {
+      final accountIndex = preBalance['accountIndex'] as int;
+      if (processedIndices.contains(accountIndex)) continue;
+
+      final mint = preBalance['mint'] as String;
+      final preAmount = double.parse(preBalance['uiTokenAmount']['uiAmountString'] ?? '0');
+
+      if (preAmount.abs() < 0.000001) continue;
+
+      changes.add({
+        'mint': mint,
+        'change': -preAmount,
+        'owner': preBalance['owner'] ?? 'unknown',
+      });
+    }
+
+    return changes;
+  }
+
+  double _getChangeForMint(List<Map<String, dynamic>> changes, String mint) {
+    final match = changes.firstWhere(
+      (c) => c['mint'] == mint,
+      orElse: () => {'change': 0.0},
+    );
+    return match['change'] as double;
+  }
+
+  Future<Uint8List> _fetchPriceCurveAccountData() async {
+    final accountInfo = await _rpcClient.getAccountInfo(_config.priceCurve);
+
+    if (accountInfo.isEmpty || accountInfo['data'] == null) {
+      throw Exception('PriceCurve2 account not found');
+    }
+
+    final base64Data = accountInfo['data']?[0];
+    if (base64Data == null || base64Data.isEmpty) {
+      throw Exception('PriceCurve2 account contains no data');
+    }
+
+    final bytes = base64.decode(base64Data);
+
+    return bytes;
   }
 
   Future<Uint8List> _fetchTenantAccountData() async {
@@ -89,52 +462,51 @@ class NirvanaClient {
     return true;
   }
 
-  _PriceData _calculatePrices(Uint8List bytes) {
-    if (bytes.length < 500) {
-      throw Exception('Tenant account data too small - corrupted or invalid');
+  _PriceData _calculatePrices(Uint8List tenantBytes, Uint8List priceCurveBytes) {
+    final int minimumTenantBytes = 593;
+    if (tenantBytes.length < minimumTenantBytes) {
+      throw Exception('Tenant account data too small - expected at least $minimumTenantBytes bytes, got ${tenantBytes.length}');
     }
 
-    // Parse Tenant struct fields based on IDL structure
-    int offset = 8; // Skip discriminator
-
-    // Skip admin pubkey and flags
-    offset += 32; // field_0: admin pubkey
-    offset += 1;  // field_1: u8
-
-    // Skip vault and mint pubkeys (12 fields × 32 bytes)
-    offset += 32 * 12; // fields 2-13
-
-    // Read field 14 - the reserve/liquidity field used in bonding curve
-    final field14 = _bytesToUint64(bytes.sublist(offset, offset + 8));
-
-    // Validate field value before calculation
-    if (field14 == 0) {
-      throw Exception('Invalid price data - reserve field is zero');
+    final int minimumPriceCurveBytes = 104;
+    if (priceCurveBytes.length < minimumPriceCurveBytes) {
+      throw Exception('PriceCurve2 account data too small - expected at least $minimumPriceCurveBytes bytes, got ${priceCurveBytes.length}');
     }
 
-    // Calculate prices using bonding curve formula
-    // Price = sqrt(field14 * 1e-9 * k)
-    // This eliminates all hard-coded scaling factors!
-    const marketK = 4104.0 / 1000000.0;  // Fine-tuned k value for market price
-    const floorK = 1999.0 / 1000000.0;   // Fine-tuned k value for floor price
-    
-    final anaMarket = math.sqrt(field14.toDouble() * 1e-9 * marketK);
-    final anaFloor = math.sqrt(field14.toDouble() * 1e-9 * floorK);
-    
-    // prANA price equals the premium (market - floor)
-    final prana = anaMarket - anaFloor;
+    final double anaFloor = _decodeFloorPriceFromPriceCurve(priceCurveBytes);
 
-    // Validate calculated prices are reasonable
-    if (anaMarket <= 0 || anaMarket > 1000) {
-      throw Exception('Calculated ANA market price out of reasonable range: \$${anaMarket.toStringAsFixed(4)}');
+    final int depositedAna = _readDepositedAna(tenantBytes);
+
+    final int floorEndVertexX = _readFloorEndVertexX(priceCurveBytes);
+
+    final double floorEndVertexSlope = _readFloorEndVertexSlope(priceCurveBytes);
+
+    final double sellFeeRatio = _readSellFeeRatio(tenantBytes);
+
+    final double anaMarketRaw = _calculateMarketPrice(
+      anaFloor,
+      depositedAna,
+      floorEndVertexX,
+      floorEndVertexSlope,
+    );
+
+    final double anaMarket = anaMarketRaw * (1 - sellFeeRatio);
+
+    final double prana = anaMarket - anaFloor;
+
+    final bool isFloorPriceValid = anaFloor > 0 && anaFloor < 1000;
+    if (!isFloorPriceValid) {
+      throw Exception('Floor price out of reasonable range: \$${anaFloor.toStringAsFixed(4)}');
     }
 
-    if (anaFloor <= 0 || anaFloor > 1000) {
-      throw Exception('Calculated ANA floor price out of reasonable range: \$${anaFloor.toStringAsFixed(4)}');
+    final bool isMarketPriceValid = anaMarket > 0 && anaMarket < 1000;
+    if (!isMarketPriceValid) {
+      throw Exception('Market price out of reasonable range: \$${anaMarket.toStringAsFixed(4)}');
     }
 
-    if (prana <= 0 || prana > 100) {
-      throw Exception('Calculated prANA price out of reasonable range: \$${prana.toStringAsFixed(4)}');
+    final bool isPranaPriceValid = prana >= 0 && prana < 100;
+    if (!isPranaPriceValid) {
+      throw Exception('prANA price out of reasonable range: \$${prana.toStringAsFixed(4)}');
     }
 
     return _PriceData(
@@ -142,6 +514,114 @@ class NirvanaClient {
       anaFloor: anaFloor,
       prana: prana,
     );
+  }
+
+  double _decodeFloorPriceFromPriceCurve(Uint8List priceCurveBytes) {
+    const int floorPriceOffset = 40;
+    const int floorPriceBytesLength = 16;
+
+    final List<int> floorPriceBytes = priceCurveBytes.sublist(
+      floorPriceOffset,
+      floorPriceOffset + floorPriceBytesLength,
+    );
+
+    final double floorPrice = _decodeDecimalBytes(floorPriceBytes);
+
+    return floorPrice;
+  }
+
+  int _readDepositedAna(Uint8List tenantBytes) {
+    const int discriminatorLength = 8;
+    const int adminPubkeyLength = 32;
+    const int flagsLength = 1;
+    const int vaultFieldsLength = 32 * 12;
+
+    const int depositedAnaOffset = discriminatorLength +
+        adminPubkeyLength +
+        flagsLength +
+        vaultFieldsLength;
+
+    final int depositedAna = _bytesToUint64(
+      tenantBytes.sublist(depositedAnaOffset, depositedAnaOffset + 8),
+    );
+
+    return depositedAna;
+  }
+
+  int _readFloorEndVertexX(Uint8List priceCurveBytes) {
+    const int floorEndVertexXOffset = 56;
+
+    final int floorEndVertexX = _bytesToUint64(
+      priceCurveBytes.sublist(floorEndVertexXOffset, floorEndVertexXOffset + 8),
+    );
+
+    return floorEndVertexX;
+  }
+
+  double _readFloorEndVertexSlope(Uint8List priceCurveBytes) {
+    const int floorEndVertexSlopeOffset = 64;
+    const int slopeBytesLength = 16;
+
+    final List<int> slopeBytes = priceCurveBytes.sublist(
+      floorEndVertexSlopeOffset,
+      floorEndVertexSlopeOffset + slopeBytesLength,
+    );
+
+    final double slope = _decodeDecimalBytes(slopeBytes);
+
+    return slope;
+  }
+
+  double _readSellFeeRatio(Uint8List tenantBytes) {
+    // Offset 585 contains the total sell fee (8953 Mbps = 0.8953%)
+    // This includes both the ANA fee portion and USDC adjustment
+    const int sellFeeMbpsOffset = 585;
+
+    final int sellFeeMbps = _bytesToUint64(
+      tenantBytes.sublist(sellFeeMbpsOffset, sellFeeMbpsOffset + 8),
+    );
+
+    final double sellFeeRatio = sellFeeMbps / 1000000.0;
+
+    return sellFeeRatio;
+  }
+
+  double _calculateMarketPrice(
+    double floorPrice,
+    int depositedAna,
+    int floorEndVertexX,
+    double slope,
+  ) {
+    final bool isDepositedAnaValid = depositedAna > 0;
+    if (!isDepositedAnaValid) {
+      throw Exception('Invalid deposited ANA - value is zero');
+    }
+
+    final bool isAtOrAboveFloor = depositedAna >= floorEndVertexX;
+    if (isAtOrAboveFloor) {
+      return floorPrice;
+    }
+
+    final int distanceToFloor = floorEndVertexX - depositedAna;
+
+    final double premium = slope * distanceToFloor.toDouble();
+
+    final double marketPrice = floorPrice + premium;
+
+    return marketPrice;
+  }
+
+  double _decodeDecimalBytes(List<int> bytes) {
+    final int scale = bytes[2];
+    if (scale < 10 || scale > 32) return 0.0;
+
+    BigInt rawValue = BigInt.zero;
+    for (int i = 4; i < 16; i++) {
+      rawValue |= BigInt.from(bytes[i]) << (8 * (i - 4));
+    }
+
+    final BigInt divisor = BigInt.from(10).pow(scale);
+    return rawValue.toDouble() / divisor.toDouble();
   }
 
   int _bytesToUint64(List<int> bytes) {

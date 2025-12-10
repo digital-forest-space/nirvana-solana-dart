@@ -6,16 +6,22 @@ import 'package:solana/encoder.dart';
 abstract class SolanaRpcClient {
   /// Get account information
   Future<Map<String, dynamic>> getAccountInfo(String address);
-  
+
   /// Get token account balance
   Future<double> getTokenBalance(String tokenAccount);
-  
+
   /// Find token account for owner and mint
   Future<String?> findTokenAccount(String owner, String mint);
-  
+
   /// Get associated token address
   Future<String> getAssociatedTokenAddress(String owner, String mint);
-  
+
+  /// Get recent transaction signatures for an address
+  Future<List<String>> getSignaturesForAddress(String address, {int limit = 100});
+
+  /// Get transaction details (returns jsonParsed format)
+  Future<Map<String, dynamic>> getTransaction(String signature);
+
   /// Send and confirm transaction
   Future<String> sendAndConfirmTransaction({
     required Message message,
@@ -89,6 +95,36 @@ class DefaultSolanaRpcClient implements SolanaRpcClient {
   }
   
   @override
+  Future<List<String>> getSignaturesForAddress(String address, {int limit = 100}) async {
+    final signatures = await _client.rpcClient.getSignaturesForAddress(
+      address,
+      limit: limit,
+    );
+
+    return signatures
+        .where((sig) => sig.err == null)
+        .map((sig) => sig.signature)
+        .toList();
+  }
+
+  @override
+  Future<Map<String, dynamic>> getTransaction(String signature) async {
+    final tx = await _client.rpcClient.getTransaction(
+      signature,
+      encoding: Encoding.jsonParsed,
+    );
+
+    if (tx == null) {
+      throw Exception('Transaction not found: $signature');
+    }
+
+    return {
+      'meta': tx.meta?.toJson(),
+      'transaction': tx.transaction.toJson(),
+    };
+  }
+
+  @override
   Future<String> sendAndConfirmTransaction({
     required Message message,
     required List<Ed25519HDKeyPair> signers,
@@ -99,7 +135,7 @@ class DefaultSolanaRpcClient implements SolanaRpcClient {
       signers: signers,
       commitment: commitment,
     );
-    
+
     return signature;
   }
 }
