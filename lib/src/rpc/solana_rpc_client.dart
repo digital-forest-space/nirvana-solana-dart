@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:solana/solana.dart';
 import 'package:solana/dto.dart';
 import 'package:solana/encoder.dart';
@@ -43,17 +44,25 @@ class DefaultSolanaRpcClient implements SolanaRpcClient {
       pubKey.toBase58(),
       encoding: Encoding.base64,
     );
-    
+
     if (account == null || account.value == null) {
       return {};
     }
-    
+
+    // Handle BinaryAccountData - extract base64 string
+    final data = account.value!.data;
+    List<dynamic>? dataArray;
+    if (data is BinaryAccountData) {
+      // BinaryAccountData has a data property containing base64 string
+      dataArray = [base64.encode(data.data), 'base64'];
+    }
+
     return {
       'lamports': account.value!.lamports,
       'owner': account.value!.owner,
       'executable': account.value!.executable,
       'rentEpoch': account.value!.rentEpoch,
-      'data': account.value!.data,
+      'data': dataArray,
     };
   }
   
@@ -66,18 +75,16 @@ class DefaultSolanaRpcClient implements SolanaRpcClient {
   
   @override
   Future<String?> findTokenAccount(String owner, String mint) async {
-    final ownerPubkey = Ed25519HDPublicKey.fromBase58(owner);
-    final mintPubkey = Ed25519HDPublicKey.fromBase58(mint);
-    
     final accounts = await _client.rpcClient.getTokenAccountsByOwner(
-      ownerPubkey.toBase58(),
-      TokenAccountsFilter.byMint(mintPubkey.toBase58()),
+      owner,
+      TokenAccountsFilter.byMint(mint),
+      encoding: Encoding.jsonParsed,
     );
-    
+
     if (accounts.value.isEmpty) {
       return null;
     }
-    
+
     return accounts.value.first.pubkey;
   }
   

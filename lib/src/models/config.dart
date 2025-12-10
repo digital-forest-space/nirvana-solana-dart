@@ -37,6 +37,7 @@ class NirvanaConfig {
       programId: 'NirvHuZvrm2zSxjkBvSbaF2tHfP5j7cvMj9QmdoHVwb',
       tenantAccount: 'BcAoCEdkzV2J21gAjCCEokBw5iMnAe96SbYo9F6QmKWV',
       priceCurve: 'Fx5u5BCTwpckbB6jBbs13nDsRabHb5bq2t2hBDszhSbd',
+      // Official Nirvana token addresses - DO NOT CHANGE
       anaMint: '5DkzT65YJvCsZcot9L6qwkJnsBCPmKHjJz3QU7t7QeRW',
       nirvMint: '3eamaYJ7yicyRd3mYz4YeNyNPGVo6zMmKUp5UP25AxRM',
       pranaMint: 'CLr7G2af9VSfH1PFZ5fYvB8WK1DTgE85qrVjpa8Xkg4N',

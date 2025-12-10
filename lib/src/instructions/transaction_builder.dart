@@ -38,22 +38,23 @@ class NirvanaTransactionBuilder {
       ...minAnaBytes,
     ];
     
-    // Build accounts based on payment type
+    // Build accounts in exact order from browser-intercepted transaction
+    // Position 3 = 5DkzT65... (ANA), Position 4 = 3eamaYJ... (NIRV)
+    // Position 9 is payment source, position 10 is user ANA destination
     final accounts = [
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userPubkey), isSigner: true, isWriteable: true),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.tenantAccount), isSigner: false, isWriteable: true),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.priceCurve), isSigner: false, isWriteable: false),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.nirvMint), isSigner: false, isWriteable: true),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.anaMint), isSigner: false, isWriteable: true),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.usdcMint), isSigner: false, isWriteable: false),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.tenantUsdcVault), isSigner: false, isWriteable: true),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.tenantAnaVault), isSigner: false, isWriteable: true),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.escrowRevNirv), isSigner: false, isWriteable: true),
-      // Position 9 changes based on payment type
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(useNirv ? userAnaAccount : userPaymentAccount), isSigner: false, isWriteable: true),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userNirvAccount), isSigner: false, isWriteable: true),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(tokenProgram), isSigner: false, isWriteable: false),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(tokenProgram), isSigner: false, isWriteable: false),
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userPubkey), isSigner: true, isWriteable: true),        // 0: payer (signer)
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.tenantAccount), isSigner: false, isWriteable: true),  // 1: tenant
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.priceCurve), isSigner: false, isWriteable: false),    // 2: price curve PDA
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.anaMint), isSigner: false, isWriteable: true),        // 3: ANA mint (5DkzT65...)
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.nirvMint), isSigner: false, isWriteable: true),       // 4: NIRV mint (3eamaYJ...)
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.usdcMint), isSigner: false, isWriteable: false),      // 5: USDC mint
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.tenantUsdcVault), isSigner: false, isWriteable: true), // 6: tenant USDC vault
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.tenantAnaVault), isSigner: false, isWriteable: true),  // 7: tenant ANA vault
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.escrowRevNirv), isSigner: false, isWriteable: true),   // 8: escrow revenue NIRV
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(useNirv ? userNirvAccount : userPaymentAccount), isSigner: false, isWriteable: true), // 9: payment source
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userAnaAccount), isSigner: false, isWriteable: true),          // 10: user ANA destination
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(tokenProgram), isSigner: false, isWriteable: false),           // 11: token program
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(tokenProgram), isSigner: false, isWriteable: false),           // 12: token program (duplicate)
     ];
     
     return Instruction(
@@ -63,48 +64,47 @@ class NirvanaTransactionBuilder {
     );
   }
   
-  /// Build sell_exact2 instruction
-  Instruction buildSellExact2Instruction({
+  /// Build sell2 instruction (sells ANA for USDC)
+  /// Based on Chrome injection analysis of actual sell transactions
+  Instruction buildSellInstruction({
     required String userPubkey,
     required String userAnaAccount,
     required String userUsdcAccount,
-    required String userNirvAccount,
     required int anaLamports,
     int minUsdcLamports = 0,
   }) {
-    // sell_exact2 discriminator
-    final discriminator = [19, 250, 156, 171, 34, 215, 0, 78];
-    
+    // sell2 discriminator (confirmed from Chrome injection analysis)
+    final discriminator = [47, 191, 120, 1, 28, 35, 253, 79];
+
     // Build instruction data
     final anaBytes = Uint8List(8);
     anaBytes.buffer.asByteData().setUint64(0, anaLamports, Endian.little);
     final minUsdcBytes = Uint8List(8);
     minUsdcBytes.buffer.asByteData().setUint64(0, minUsdcLamports, Endian.little);
-    
+
     final instructionData = [
       ...discriminator,
       ...anaBytes,
       ...minUsdcBytes,
     ];
-    
-    // Build accounts
+
+    // Build accounts in exact order from Chrome injection analysis
     final accounts = [
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userPubkey), isSigner: true, isWriteable: true),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.tenantAccount), isSigner: false, isWriteable: true),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.priceCurve), isSigner: false, isWriteable: false),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.nirvMint), isSigner: false, isWriteable: true),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.anaMint), isSigner: false, isWriteable: true),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.usdcMint), isSigner: false, isWriteable: false),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.tenantUsdcVault), isSigner: false, isWriteable: true),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.tenantAnaVault), isSigner: false, isWriteable: true),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.escrowRevNirv), isSigner: false, isWriteable: true),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userAnaAccount), isSigner: false, isWriteable: true),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userUsdcAccount), isSigner: false, isWriteable: true),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userNirvAccount), isSigner: false, isWriteable: true),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(tokenProgram), isSigner: false, isWriteable: false),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(tokenProgram), isSigner: false, isWriteable: false),
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userPubkey), isSigner: true, isWriteable: true),           // 0: user/signer
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.tenantAccount), isSigner: false, isWriteable: true), // 1: tenant
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.priceCurve), isSigner: false, isWriteable: true),    // 2: price curve (must be writable!)
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.anaMint), isSigner: false, isWriteable: true),       // 3: ANA mint
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userUsdcAccount), isSigner: false, isWriteable: true),       // 4: user USDC account (destination)
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.escrowRevNirv), isSigner: false, isWriteable: true), // 5: escrow ANA (same as escrowRevNirv)
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.tenantUsdcVault), isSigner: false, isWriteable: true), // 6: tenant USDC vault (source)
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.tenantAnaVault), isSigner: false, isWriteable: true),  // 7: tenant ANA/NIRV vault
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userAnaAccount), isSigner: false, isWriteable: true),        // 8: user ANA account (source)
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.nirvMint), isSigner: false, isWriteable: false),     // 9: NIRV mint
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.usdcMint), isSigner: false, isWriteable: false),     // 10: USDC mint
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(tokenProgram), isSigner: false, isWriteable: false),         // 11: token program
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(tokenProgram), isSigner: false, isWriteable: false),         // 12: token program (duplicate)
     ];
-    
+
     return Instruction(
       programId: Ed25519HDPublicKey.fromBase58(_config.programId),
       accounts: accounts,
@@ -205,6 +205,43 @@ class NirvanaTransactionBuilder {
       AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(tokenProgram), isSigner: false, isWriteable: false),
     ];
     
+    return Instruction(
+      programId: Ed25519HDPublicKey.fromBase58(_config.programId),
+      accounts: accounts,
+      data: ByteArray(Uint8List.fromList(instructionData)),
+    );
+  }
+
+  /// Build repay instruction (repays NIRV debt by burning ANA)
+  /// Based on Chrome injection analysis of actual repay transactions
+  Instruction buildRepayInstruction({
+    required String userPubkey,
+    required String personalAccount,
+    required String userAnaAccount,
+    required int anaLamports,
+  }) {
+    // repay discriminator (confirmed from Chrome injection analysis)
+    final discriminator = [28, 158, 130, 191, 125, 127, 195, 94];
+
+    // Build instruction data
+    final anaBytes = Uint8List(8);
+    anaBytes.buffer.asByteData().setUint64(0, anaLamports, Endian.little);
+
+    final instructionData = [
+      ...discriminator,
+      ...anaBytes,
+    ];
+
+    // Build accounts in exact order from Chrome injection analysis (6 accounts)
+    final accounts = [
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userPubkey), isSigner: true, isWriteable: true),           // 0: user/signer
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.tenantAccount), isSigner: false, isWriteable: true), // 1: tenant
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(personalAccount), isSigner: false, isWriteable: true),       // 2: personal account
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userAnaAccount), isSigner: false, isWriteable: true),        // 3: user ANA account (burns ANA)
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.anaMint), isSigner: false, isWriteable: true),       // 4: ANA mint
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(tokenProgram), isSigner: false, isWriteable: false),         // 5: token program
+    ];
+
     return Instruction(
       programId: Ed25519HDPublicKey.fromBase58(_config.programId),
       accounts: accounts,

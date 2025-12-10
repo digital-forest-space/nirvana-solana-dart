@@ -772,12 +772,11 @@ class NirvanaClient {
           ? (request.minUsdcAmount! * 1000000).toInt() 
           : 0;
       
-      // Build sell instruction
-      final instruction = _transactionBuilder.buildSellExact2Instruction(
+      // Build sell instruction (sell2 - sells ANA for USDC)
+      final instruction = _transactionBuilder.buildSellInstruction(
         userPubkey: request.userPubkey,
         userAnaAccount: accounts.anaAccount!,
         userUsdcAccount: accounts.usdcAccount!,
-        userNirvAccount: accounts.nirvAccount!,
         anaLamports: anaLamports,
         minUsdcLamports: minUsdcLamports,
       );
@@ -940,13 +939,54 @@ class NirvanaClient {
     throw UnimplementedError('claimPrana not yet implemented');
   }
   
+  /// Repay NIRV debt by burning ANA tokens
+  /// The ANA is burned to reduce outstanding NIRV debt on the personal account
   Future<TransactionResult> repayNirv({
     required String userPubkey,
     required Ed25519HDKeyPair keypair,
-    required double nirvAmount,
+    required double anaAmount,
   }) async {
-    // TODO: Implement
-    throw UnimplementedError('repayNirv not yet implemented');
+    try {
+      // Find personal account (required for repay)
+      final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
+      if (personalAccount == null) {
+        throw Exception('User does not have a personal account. Cannot repay without borrowed position.');
+      }
+
+      // Resolve user accounts
+      final accounts = await _accountResolver.resolveUserAccounts(userPubkey);
+      if (accounts.anaAccount == null) {
+        throw Exception('User does not have ANA token account');
+      }
+
+      // Convert to lamports (ANA has 6 decimals)
+      final anaLamports = (anaAmount * 1000000).toInt();
+
+      // Build repay instruction
+      final instruction = _transactionBuilder.buildRepayInstruction(
+        userPubkey: userPubkey,
+        personalAccount: personalAccount,
+        userAnaAccount: accounts.anaAccount!,
+        anaLamports: anaLamports,
+      );
+
+      // Create and send transaction
+      final message = Message(instructions: [instruction]);
+      final signature = await _rpcClient.sendAndConfirmTransaction(
+        message: message,
+        signers: [keypair],
+      );
+
+      return TransactionResult.success(
+        signature: signature,
+        logs: ['Repay NIRV transaction successful - burned $anaAmount ANA'],
+      );
+    } catch (e) {
+      return TransactionResult.failure(
+        signature: '',
+        error: e.toString(),
+      );
+    }
   }
   
   Future<TransactionResult> realizePrana({
