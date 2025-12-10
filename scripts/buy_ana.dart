@@ -83,14 +83,6 @@ void main(List<String> args) async {
   print('  Paying: $amount $paymentCurrency');
   print('  Estimated ANA: ${estimatedAna.toStringAsFixed(6)} ANA');
 
-  // Confirm
-  print('\nProceed with buy? (y/n): ');
-  final confirm = stdin.readLineSync()?.toLowerCase();
-  if (confirm != 'y' && confirm != 'yes') {
-    print('Cancelled.');
-    exit(0);
-  }
-
   // Execute buy
   print('\nExecuting buy transaction...');
 

@@ -113,35 +113,38 @@ class NirvanaTransactionBuilder {
   }
   
   /// Build deposit_ana (stake) instruction
+  /// Based on Chrome injection analysis from companion stake_ana.dart
   Instruction buildDepositAnaInstruction({
     required String userPubkey,
     required String userAnaAccount,
     required String personalAccount,
     required int anaLamports,
   }) {
-    // deposit_ana discriminator
-    final discriminator = [54, 176, 103, 174, 10, 63, 188, 186];
-    
+    // deposit_ana discriminator (from Chrome injection analysis)
+    final discriminator = [68, 100, 197, 87, 22, 85, 190, 78];
+
+    // Vault ANA account discovered from Chrome injection
+    const String vaultAnaAccount = 'GUEs3s1j1gvQ2F7xMXh6vHnB5t1bQG4zev1qEfWJKEea';
+
     // Build instruction data
     final amountBytes = Uint8List(8);
     amountBytes.buffer.asByteData().setUint64(0, anaLamports, Endian.little);
-    
+
     final instructionData = [
       ...discriminator,
       ...amountBytes,
     ];
-    
-    // Build accounts
+
+    // Build accounts in exact order from Chrome injection analysis (6 accounts)
     final accounts = [
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userPubkey), isSigner: true, isWriteable: true),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.tenantAccount), isSigner: false, isWriteable: true),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(personalAccount), isSigner: false, isWriteable: true),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.anaMint), isSigner: false, isWriteable: true),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userAnaAccount), isSigner: false, isWriteable: true),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.tenantAnaVault), isSigner: false, isWriteable: true),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(tokenProgram), isSigner: false, isWriteable: false),
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userPubkey), isSigner: true, isWriteable: true),           // 0: user/signer
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.tenantAccount), isSigner: false, isWriteable: true), // 1: tenant
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(personalAccount), isSigner: false, isWriteable: true),       // 2: personal account
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userAnaAccount), isSigner: false, isWriteable: true),        // 3: user ANA account (source)
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(vaultAnaAccount), isSigner: false, isWriteable: true),       // 4: vault ANA account (destination)
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(tokenProgram), isSigner: false, isWriteable: false),         // 5: token program
     ];
-    
+
     return Instruction(
       programId: Ed25519HDPublicKey.fromBase58(_config.programId),
       accounts: accounts,

@@ -2,22 +2,22 @@ import 'dart:io';
 import 'package:nirvana_solana/nirvana_solana.dart';
 import 'package:solana/solana.dart';
 
-/// Execute a repay NIRV debt transaction (burns ANA to repay debt)
+/// Stake ANA tokens
 ///
-/// Usage: dart scripts/repay_ana.dart <keypair_path> <ana_amount> [--rpc <url>]
+/// Usage: dart scripts/stake_ana.dart <keypair_path> <ana_amount> [--rpc <url>]
 ///
 /// Examples:
-///   dart scripts/repay_ana.dart ~/.config/solana/id.json 2.0
-///   dart scripts/repay_ana.dart ~/.config/solana/id.json 2.0 --rpc https://my-rpc.com
+///   dart scripts/stake_ana.dart ~/.config/solana/id.json 1.0
+///   dart scripts/stake_ana.dart ~/.config/solana/id.json 1.0 --rpc https://my-rpc.com
 ///
 /// Environment:
 ///   SOLANA_RPC_URL - RPC endpoint (default: https://api.mainnet-beta.solana.com)
 
 void main(List<String> args) async {
   if (args.length < 2) {
-    print('Usage: dart scripts/repay_ana.dart <keypair_path> <ana_amount> [--rpc <url>]');
+    print('Usage: dart scripts/stake_ana.dart <keypair_path> <ana_amount> [--rpc <url>]');
     print('');
-    print('This burns ANA to repay outstanding NIRV debt on your personal account.');
+    print('Stake ANA tokens to earn prANA rewards.');
     print('');
     print('Options:');
     print('  --rpc <url>  Custom RPC endpoint');
@@ -26,7 +26,7 @@ void main(List<String> args) async {
     print('  SOLANA_RPC_URL  RPC endpoint (overridden by --rpc)');
     print('');
     print('Examples:');
-    print('  dart scripts/repay_ana.dart ~/.config/solana/id.json 2.0');
+    print('  dart scripts/stake_ana.dart ~/.config/solana/id.json 1.0');
     exit(1);
   }
 
@@ -72,26 +72,28 @@ void main(List<String> args) async {
   final floorPrice = await client.fetchFloorPrice();
   print('  Floor price: \$${floorPrice.toStringAsFixed(6)}');
 
-  // Estimate debt repayment value
-  final repayValue = anaAmount * floorPrice;
+  // Show transaction details
+  final stakeValue = anaAmount * floorPrice;
   print('\nTransaction:');
-  print('  Burning: $anaAmount ANA');
-  print('  Debt repaid: ~\$${repayValue.toStringAsFixed(6)} worth of NIRV');
+  print('  Staking: $anaAmount ANA');
+  print('  Value: ~\$${stakeValue.toStringAsFixed(2)} (at floor price)');
 
-  // Execute repay
-  print('\nExecuting repay transaction...');
-  final result = await client.repayNirv(
+  // Execute stake
+  print('\nExecuting stake transaction...');
+  final request = StakeAnaRequest(
     userPubkey: userPubkey,
     keypair: keypair,
     anaAmount: anaAmount,
   );
 
+  final result = await client.stakeAna(request);
+
   if (result.success) {
-    print('\n✅ Repay successful!');
+    print('\n✅ Stake successful!');
     print('  Signature: ${result.signature}');
     print('  Explorer: https://solscan.io/tx/${result.signature}');
   } else {
-    print('\n❌ Repay failed!');
+    print('\n❌ Stake failed!');
     print('  Error: ${result.error}');
   }
 }

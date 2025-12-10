@@ -78,14 +78,6 @@ void main(List<String> args) async {
   print('  Borrowing: $nirvAmount NIRV');
   print('  Collateral required: ~${(nirvAmount / floorPrice).toStringAsFixed(6)} ANA (at floor price)');
 
-  // Confirm
-  print('\nProceed with borrow? (y/n): ');
-  final confirm = stdin.readLineSync()?.toLowerCase();
-  if (confirm != 'y' && confirm != 'yes') {
-    print('Cancelled.');
-    exit(0);
-  }
-
   // Execute borrow
   print('\nExecuting borrow transaction...');
   final result = await client.borrowNirv(

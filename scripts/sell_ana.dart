@@ -76,14 +76,6 @@ void main(List<String> args) async {
   print('  Selling: $anaAmount ANA');
   print('  Estimated USDC: ${estimatedUsdc.toStringAsFixed(6)} USDC (after ~3% fee)');
 
-  // Confirm
-  print('\nProceed with sell? (y/n): ');
-  final confirm = stdin.readLineSync()?.toLowerCase();
-  if (confirm != 'y' && confirm != 'yes') {
-    print('Cancelled.');
-    exit(0);
-  }
-
   // Execute sell
   print('\nExecuting sell transaction...');
   final request = SellAnaRequest(
