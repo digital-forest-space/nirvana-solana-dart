@@ -29,6 +29,14 @@ abstract class SolanaRpcClient {
     required List<Ed25519HDKeyPair> signers,
     Commitment commitment = Commitment.confirmed,
   });
+
+  /// Find program accounts with filters (for PersonalAccount lookup)
+  Future<List<Map<String, dynamic>>> getProgramAccounts(
+    String programId, {
+    required int dataSize,
+    required int memcmpOffset,
+    required String memcmpBytes,
+  });
 }
 
 /// Default implementation using solana package
@@ -144,5 +152,38 @@ class DefaultSolanaRpcClient implements SolanaRpcClient {
     );
 
     return signature;
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> getProgramAccounts(
+    String programId, {
+    required int dataSize,
+    required int memcmpOffset,
+    required String memcmpBytes,
+  }) async {
+    // Convert base58 pubkey string to bytes for memcmp filter
+    final pubkeyBytes = Ed25519HDPublicKey.fromBase58(memcmpBytes).bytes;
+
+    final accounts = await _client.rpcClient.getProgramAccounts(
+      programId,
+      encoding: Encoding.base64,
+      filters: [
+        ProgramDataFilter.dataSize(dataSize),
+        ProgramDataFilter.memcmp(offset: memcmpOffset, bytes: pubkeyBytes),
+      ],
+    );
+
+    return accounts.map((account) {
+      return {
+        'pubkey': account.pubkey,
+        'account': {
+          'data': account.account.data is BinaryAccountData
+              ? [base64.encode((account.account.data as BinaryAccountData).data), 'base64']
+              : account.account.data,
+          'lamports': account.account.lamports,
+          'owner': account.account.owner,
+        },
+      };
+    }).toList();
   }
 }

@@ -26,20 +26,26 @@ class NirvanaAccountResolver {
     );
   }
   
-  /// Find user's personal account (for staking)
+  /// Find user's personal account (for staking/borrowing)
+  /// Queries program accounts with dataSize=272 and memcmp filter for user pubkey at offset 8
   Future<String?> findPersonalAccount(String userPubkey) async {
-    // Known mappings from research
-    final knownMappings = {
-      'BVG7vbwH9BUWftGHKGkCkTSC6yRdQivaSVYTDmhYdheT': '9vZSzEozja7ovtesgKX32NcfWXgq5WUg2TfAq7gzXAGY',
-      'HV1Y8nqukqjc6Swrgsu7XoYPbJEvR7sxP6rupUehzC4H': 'MsPpd4SXKAbbXhnjhJ6hn8cjxoLjUzEV5nzhVLRyYfD',
-    };
-    
-    if (knownMappings.containsKey(userPubkey)) {
-      return knownMappings[userPubkey];
+    try {
+      final accounts = await _rpcClient.getProgramAccounts(
+        _config.programId,
+        dataSize: 272,  // PersonalAccount size
+        memcmpOffset: 8,  // Skip discriminator, match user pubkey at field 0
+        memcmpBytes: userPubkey,
+      );
+
+      if (accounts.isEmpty) {
+        return null;
+      }
+
+      return accounts.first['pubkey'] as String;
+    } catch (e) {
+      // Fallback to null if RPC call fails
+      return null;
     }
-    
-    // TODO: Implement PDA derivation or program account search
-    return null;
   }
   
   /// Get user's token balances
