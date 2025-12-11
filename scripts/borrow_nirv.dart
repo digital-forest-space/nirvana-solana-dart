@@ -106,15 +106,7 @@ void main(List<String> args) async {
       }
 
       // Output JSON result
-      print(jsonEncode({
-        'success': true,
-        'signature': result.signature,
-        'type': tx.type.name,
-        'borrowed': tx.received != null ? {'amount': tx.received!.amount, 'currency': tx.received!.currency} : null,
-        'timestamp': tx.timestamp.toIso8601String(),
-        'userAddress': tx.userAddress,
-        'explorer': 'https://solscan.io/tx/${result.signature}',
-      }));
+      print(jsonEncode(tx.toJson()));
     } catch (e) {
       print(jsonEncode({
         'success': true,

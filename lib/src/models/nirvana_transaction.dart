@@ -23,6 +23,11 @@ class TokenAmount extends Equatable {
     required this.currency,
   });
 
+  Map<String, dynamic> toJson() => {
+    'amount': amount,
+    'currency': currency,
+  };
+
   @override
   List<Object?> get props => [amount, currency];
 
@@ -35,8 +40,8 @@ class NirvanaTransaction extends Equatable {
   final String signature;
   final NirvanaTransactionType type;
   final TokenAmount? received;
-  final TokenAmount? spent;
-  final TokenAmount? fee; // Fee is a separate TokenAmount since it can be a different currency than spent
+  final TokenAmount? sent;
+  final TokenAmount? fee; // Fee is a separate TokenAmount since it can be a different currency than sent
   final DateTime timestamp;
   final String userAddress;
 
@@ -44,7 +49,7 @@ class NirvanaTransaction extends Equatable {
     required this.signature,
     required this.type,
     this.received,
-    this.spent,
+    this.sent,
     this.fee,
     required this.timestamp,
     required this.userAddress,
@@ -52,27 +57,38 @@ class NirvanaTransaction extends Equatable {
 
   /// Price per ANA (if applicable)
   double? get pricePerAna {
-    if (type == NirvanaTransactionType.buy && received != null && spent != null) {
+    if (type == NirvanaTransactionType.buy && received != null && sent != null) {
       if (received!.currency == 'ANA' && received!.amount > 0) {
-        return spent!.amount / received!.amount;
+        return sent!.amount / received!.amount;
       }
     }
-    if (type == NirvanaTransactionType.sell && received != null && spent != null) {
-      if (spent!.currency == 'ANA' && spent!.amount > 0) {
-        return received!.amount / spent!.amount;
+    if (type == NirvanaTransactionType.sell && received != null && sent != null) {
+      if (sent!.currency == 'ANA' && sent!.amount > 0) {
+        return received!.amount / sent!.amount;
       }
     }
     return null;
   }
 
+  Map<String, dynamic> toJson() => {
+    'signature': signature,
+    'type': type.name,
+    'sent': sent?.toJson(),
+    'received': received?.toJson(),
+    'fee': fee?.toJson(),
+    'pricePerAna': pricePerAna,
+    'timestamp': timestamp.toIso8601String(),
+    'userAddress': userAddress,
+  };
+
   @override
-  List<Object?> get props => [signature, type, received, spent, fee, timestamp, userAddress];
+  List<Object?> get props => [signature, type, received, sent, fee, timestamp, userAddress];
 
   @override
   String toString() {
     final buffer = StringBuffer('NirvanaTransaction(');
     buffer.write('type: ${type.name}, ');
-    if (spent != null) buffer.write('spent: $spent, ');
+    if (sent != null) buffer.write('sent: $sent, ');
     if (received != null) buffer.write('received: $received, ');
     if (fee != null) buffer.write('fee: $fee, ');
     buffer.write('timestamp: $timestamp, ');

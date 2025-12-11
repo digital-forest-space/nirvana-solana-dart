@@ -103,20 +103,12 @@ void main(List<String> args) async {
       final tx = await client.parseTransaction(result.signature);
       if (verbose) {
         print('  Type: ${tx.type.name.toUpperCase()}');
-        if (tx.spent != null) print('  Burned: ${tx.spent!.amount.toStringAsFixed(6)} ${tx.spent!.currency}');
+        if (tx.sent != null) print('  Burned: ${tx.sent!.amount.toStringAsFixed(6)} ${tx.sent!.currency}');
         print('');
       }
 
       // Output JSON result
-      print(jsonEncode({
-        'success': true,
-        'signature': result.signature,
-        'type': tx.type.name,
-        'burned': tx.spent != null ? {'amount': tx.spent!.amount, 'currency': tx.spent!.currency} : null,
-        'timestamp': tx.timestamp.toIso8601String(),
-        'userAddress': tx.userAddress,
-        'explorer': 'https://solscan.io/tx/${result.signature}',
-      }));
+      print(jsonEncode(tx.toJson()));
     } catch (e) {
       print(jsonEncode({
         'success': true,

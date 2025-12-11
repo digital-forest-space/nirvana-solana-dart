@@ -107,7 +107,7 @@ void main(List<String> args) async {
       final tx = await client.parseTransaction(result.signature);
       if (verbose) {
         print('  Type: ${tx.type.name.toUpperCase()}');
-        if (tx.spent != null) print('  Spent: ${tx.spent!.amount.toStringAsFixed(6)} ${tx.spent!.currency}');
+        if (tx.sent != null) print('  Sent: ${tx.sent!.amount.toStringAsFixed(6)} ${tx.sent!.currency}');
         if (tx.received != null) print('  Received: ${tx.received!.amount.toStringAsFixed(6)} ${tx.received!.currency}');
         if (tx.fee != null) print('  Fee: ${tx.fee!.amount.toStringAsFixed(6)} ${tx.fee!.currency}');
         if (tx.pricePerAna != null) print('  Price: \$${tx.pricePerAna!.toStringAsFixed(6)} per ANA');
@@ -115,27 +115,7 @@ void main(List<String> args) async {
       }
 
       // Output JSON result
-      print(jsonEncode({
-        'success': true,
-        'signature': result.signature,
-        'type': tx.type.name,
-        'spent': tx.spent != null ? {
-          'amount': tx.spent!.amount,
-          'currency': tx.spent!.currency,
-        } : null,
-        'received': tx.received != null ? {
-          'amount': tx.received!.amount,
-          'currency': tx.received!.currency,
-          if (tx.pricePerAna != null) 'price': tx.pricePerAna,
-        } : null,
-        'fee': tx.fee != null ? {
-          'amount': tx.fee!.amount,
-          'currency': tx.fee!.currency,
-        } : null,
-        'timestamp': tx.timestamp.toIso8601String(),
-        'userAddress': tx.userAddress,
-        'explorer': 'https://solscan.io/tx/${result.signature}',
-      }));
+      print(jsonEncode(tx.toJson()));
     } catch (e) {
       print(jsonEncode({
         'success': true,

@@ -818,9 +818,9 @@ class NirvanaClient {
       nirvChange = burnMintChanges['NIRV'] ?? 0.0;
     }
 
-    // Determine received and spent based on transaction type and balance changes
+    // Determine received and sent based on transaction type and balance changes
     TokenAmount? received;
-    TokenAmount? spent;
+    TokenAmount? sent;
     TokenAmount? fee;
 
     // Build fee TokenAmount from the first fee found (there's typically only one fee per transaction)
@@ -835,24 +835,24 @@ class NirvanaClient {
 
     switch (txType) {
       case NirvanaTransactionType.buy:
-        // User receives ANA, spends NIRV or USDC
-        // Fee is minted to treasury in ANA (different currency from spent)
+        // User receives ANA, sends NIRV or USDC
+        // Fee is minted to treasury in ANA (different currency from sent)
         if (anaChange > 0) {
           received = TokenAmount(amount: anaChange, currency: 'ANA');
         }
         if (nirvChange < 0) {
-          spent = TokenAmount(amount: nirvChange.abs(), currency: 'NIRV');
+          sent = TokenAmount(amount: nirvChange.abs(), currency: 'NIRV');
         } else if (usdcChange < 0) {
-          spent = TokenAmount(amount: usdcChange.abs(), currency: 'USDC');
+          sent = TokenAmount(amount: usdcChange.abs(), currency: 'USDC');
         }
         fee = buildFeeFromTransfers(feeTransfers);
         break;
 
       case NirvanaTransactionType.sell:
-        // User spends ANA, receives USDC or NIRV
+        // User sends ANA, receives USDC or NIRV
         // Fee is taken from the ANA being sold
         if (anaChange < 0) {
-          spent = TokenAmount(amount: anaChange.abs(), currency: 'ANA');
+          sent = TokenAmount(amount: anaChange.abs(), currency: 'ANA');
         }
         if (usdcChange > 0) {
           received = TokenAmount(amount: usdcChange, currency: 'USDC');
@@ -863,9 +863,9 @@ class NirvanaClient {
         break;
 
       case NirvanaTransactionType.stake:
-        // User spends ANA (transfers to vault)
+        // User sends ANA (transfers to vault)
         if (anaChange < 0) {
-          spent = TokenAmount(amount: anaChange.abs(), currency: 'ANA');
+          sent = TokenAmount(amount: anaChange.abs(), currency: 'ANA');
         }
         break;
 
@@ -885,16 +885,16 @@ class NirvanaClient {
         break;
 
       case NirvanaTransactionType.repay:
-        // User spends ANA (burned)
+        // User sends ANA (burned)
         if (anaChange < 0) {
-          spent = TokenAmount(amount: anaChange.abs(), currency: 'ANA');
+          sent = TokenAmount(amount: anaChange.abs(), currency: 'ANA');
         }
         break;
 
       case NirvanaTransactionType.realize:
-        // User spends prANA, receives ANA
+        // User sends prANA, receives ANA
         if (pranaChange < 0) {
-          spent = TokenAmount(amount: pranaChange.abs(), currency: 'prANA');
+          sent = TokenAmount(amount: pranaChange.abs(), currency: 'prANA');
         }
         if (anaChange > 0) {
           received = TokenAmount(amount: anaChange, currency: 'ANA');
@@ -913,17 +913,17 @@ class NirvanaClient {
         if (anaChange > 0) {
           received = TokenAmount(amount: anaChange, currency: 'ANA');
         } else if (anaChange < 0) {
-          spent = TokenAmount(amount: anaChange.abs(), currency: 'ANA');
+          sent = TokenAmount(amount: anaChange.abs(), currency: 'ANA');
         }
         if (nirvChange > 0 && received == null) {
           received = TokenAmount(amount: nirvChange, currency: 'NIRV');
-        } else if (nirvChange < 0 && spent == null) {
-          spent = TokenAmount(amount: nirvChange.abs(), currency: 'NIRV');
+        } else if (nirvChange < 0 && sent == null) {
+          sent = TokenAmount(amount: nirvChange.abs(), currency: 'NIRV');
         }
         if (usdcChange > 0 && received == null) {
           received = TokenAmount(amount: usdcChange, currency: 'USDC');
-        } else if (usdcChange < 0 && spent == null) {
-          spent = TokenAmount(amount: usdcChange.abs(), currency: 'USDC');
+        } else if (usdcChange < 0 && sent == null) {
+          sent = TokenAmount(amount: usdcChange.abs(), currency: 'USDC');
         }
         fee = buildFeeFromTransfers(feeTransfers);
         break;
@@ -933,7 +933,7 @@ class NirvanaClient {
       signature: signature,
       type: txType,
       received: received,
-      spent: spent,
+      sent: sent,
       fee: fee,
       timestamp: timestamp,
       userAddress: userAddress,
