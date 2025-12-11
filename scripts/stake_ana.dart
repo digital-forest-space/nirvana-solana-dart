@@ -80,13 +80,11 @@ void main(List<String> args) async {
 
   // Execute stake
   print('\nExecuting stake transaction...');
-  final request = StakeAnaRequest(
+  final result = await client.stakeAna(
     userPubkey: userPubkey,
     keypair: keypair,
     anaAmount: anaAmount,
   );
-
-  final result = await client.stakeAna(request);
 
   if (result.success) {
     print('\n✅ Stake successful!');

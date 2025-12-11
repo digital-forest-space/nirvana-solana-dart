@@ -78,13 +78,11 @@ void main(List<String> args) async {
 
   // Execute sell
   print('\nExecuting sell transaction...');
-  final request = SellAnaRequest(
+  final result = await client.sellAna(
     userPubkey: userPubkey,
     keypair: keypair,
     anaAmount: anaAmount,
   );
-
-  final result = await client.sellAna(request);
 
   if (result.success) {
     print('\n✅ Sell successful!');

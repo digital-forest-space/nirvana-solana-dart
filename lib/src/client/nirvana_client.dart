@@ -9,9 +9,7 @@ import '../models/prices.dart';
 import '../models/personal_account_info.dart';
 import '../models/transaction_result.dart';
 import '../models/transaction_price_result.dart';
-import '../models/requests/buy_ana_request.dart';
-import '../models/requests/sell_ana_request.dart';
-import '../models/requests/stake_ana_request.dart';
+import '../models/nirvana_transaction.dart';
 import '../rpc/solana_rpc_client.dart';
 import '../instructions/transaction_builder.dart';
 import '../accounts/account_resolver.dart';
@@ -20,10 +18,19 @@ import '../accounts/account_resolver.dart';
 class NirvanaClient {
   static const List<int> _tenantDiscriminator = [61, 43, 215, 51, 232, 242, 209, 170];
 
+  // Token mints
   static const String _anaMint = '5DkzT65YJvCsZcot9L6qwkJnsBCPmKHjJz3QU7t7QeRW';
   static const String _nirvMint = '3eamaYJ7yicyRd3mYz4YeNyNPGVo6zMmKUp5UP25AxRM';
   static const String _usdcMint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
   static const String _pranaMint = 'CLr7G2af9VSfH1PFZ5fYvB8WK1DTgE85qrVjpa8Xkg4N';
+
+  // Instruction discriminators for transaction type identification
+  static const List<int> _buyExact2Discriminator = [109, 5, 199, 243, 164, 233, 19, 152];
+  static const List<int> _sell2Discriminator = [47, 191, 120, 1, 28, 35, 253, 79];
+  static const List<int> _depositAnaDiscriminator = [68, 100, 197, 87, 22, 85, 190, 78];
+  static const List<int> _withdrawAnaDiscriminator = [93, 87, 203, 252, 78, 187, 97, 82];
+  static const List<int> _borrowNirvDiscriminator = [155, 1, 43, 62, 79, 104, 66, 42];
+  static const List<int> _repayDiscriminator = [28, 158, 130, 191, 125, 127, 195, 94];
 
   final SolanaRpcClient _rpcClient;
   final NirvanaTransactionBuilder _transactionBuilder;
@@ -692,19 +699,316 @@ class NirvanaClient {
   Future<Map<String, double>> getUserBalances(String userPubkey) async {
     return await _accountResolver.getUserBalances(userPubkey);
   }
-  
+
+  /// Parse a Nirvana protocol transaction to extract details
+  /// Returns transaction type, amounts received/spent, and timestamp
+  Future<NirvanaTransaction> parseTransaction(String signature) async {
+    final txData = await _rpcClient.getTransaction(signature);
+
+    final meta = txData['meta'] as Map<String, dynamic>?;
+    if (meta == null) {
+      throw Exception('Transaction metadata not found');
+    }
+
+    if (meta['err'] != null) {
+      throw Exception('Transaction failed: ${meta['err']}');
+    }
+
+    // Get timestamp
+    final blockTime = txData['blockTime'] as int?;
+    final timestamp = blockTime != null
+        ? DateTime.fromMillisecondsSinceEpoch(blockTime * 1000, isUtc: true)
+        : DateTime.now().toUtc();
+
+    // Get account keys and user address
+    final transaction = txData['transaction'] as Map<String, dynamic>?;
+    final message = transaction?['message'] as Map<String, dynamic>?;
+    final accountKeys = message?['accountKeys'] as List? ?? [];
+
+    String userAddress = '';
+    if (accountKeys.isNotEmpty) {
+      final firstKey = accountKeys[0];
+      userAddress = firstKey is String ? firstKey : firstKey['pubkey'] ?? '';
+    }
+
+    // Identify transaction type from instruction discriminator
+    final instructions = message?['instructions'] as List? ?? [];
+    NirvanaTransactionType txType = NirvanaTransactionType.unknown;
+
+    for (final instruction in instructions) {
+      final programId = instruction['programId'] as String?;
+      if (programId != _config.programId) continue;
+
+      final data = instruction['data'] as String?;
+      if (data == null) continue;
+
+      // Decode base58 instruction data
+      final dataBytes = _decodeBase58(data);
+      if (dataBytes.length < 8) continue;
+
+      final discriminator = dataBytes.sublist(0, 8);
+      txType = _identifyTransactionType(discriminator);
+      if (txType != NirvanaTransactionType.unknown) break;
+    }
+
+    // Extract token balance changes
+    final preTokenBalances = meta['preTokenBalances'] as List? ?? [];
+    final postTokenBalances = meta['postTokenBalances'] as List? ?? [];
+    final allChanges = _extractBalanceChanges(preTokenBalances, postTokenBalances);
+
+    // Separate by owner
+    final tenantChanges = allChanges.where((c) => c['owner'] == _config.tenantAccount).toList();
+    final userChanges = allChanges.where((c) => c['owner'] != _config.tenantAccount).toList();
+
+    // Get balance changes for each token
+    double anaChange = _getChangeForMint(userChanges, _anaMint);
+    double nirvChange = _getChangeForMint(userChanges, _nirvMint);
+    double usdcChange = _getChangeForMint(userChanges, _usdcMint);
+    double pranaChange = _getChangeForMint(userChanges, _pranaMint);
+
+    // Parse inner instructions for burn/mint operations (fallback if balance changes are 0)
+    final innerInstructions = meta['innerInstructions'] as List? ?? [];
+    final burnMintChanges = _parseBurnMintOperations(instructions, innerInstructions);
+
+    if (anaChange == 0.0) {
+      anaChange = burnMintChanges['ANA'] ?? 0.0;
+    }
+    if (nirvChange == 0.0) {
+      nirvChange = burnMintChanges['NIRV'] ?? 0.0;
+    }
+
+    // Determine received and spent based on transaction type and balance changes
+    TokenAmount? received;
+    TokenAmount? spent;
+    double? fee;
+
+    switch (txType) {
+      case NirvanaTransactionType.buy:
+        // User receives ANA, spends NIRV or USDC
+        if (anaChange > 0) {
+          received = TokenAmount(amount: anaChange, currency: 'ANA');
+        }
+        if (nirvChange < 0) {
+          spent = TokenAmount(amount: nirvChange.abs(), currency: 'NIRV');
+        } else if (usdcChange < 0) {
+          spent = TokenAmount(amount: usdcChange.abs(), currency: 'USDC');
+        }
+        break;
+
+      case NirvanaTransactionType.sell:
+        // User spends ANA, receives USDC
+        if (anaChange < 0) {
+          spent = TokenAmount(amount: anaChange.abs(), currency: 'ANA');
+        }
+        if (usdcChange > 0) {
+          received = TokenAmount(amount: usdcChange, currency: 'USDC');
+        }
+        break;
+
+      case NirvanaTransactionType.stake:
+        // User spends ANA (transfers to vault)
+        if (anaChange < 0) {
+          spent = TokenAmount(amount: anaChange.abs(), currency: 'ANA');
+        }
+        break;
+
+      case NirvanaTransactionType.unstake:
+        // User receives ANA (from vault)
+        if (anaChange > 0) {
+          received = TokenAmount(amount: anaChange, currency: 'ANA');
+        }
+        break;
+
+      case NirvanaTransactionType.borrow:
+        // User receives NIRV (minted)
+        if (nirvChange > 0) {
+          received = TokenAmount(amount: nirvChange, currency: 'NIRV');
+        }
+        break;
+
+      case NirvanaTransactionType.repay:
+        // User spends ANA (burned)
+        if (anaChange < 0) {
+          spent = TokenAmount(amount: anaChange.abs(), currency: 'ANA');
+        }
+        break;
+
+      case NirvanaTransactionType.realize:
+        // User spends prANA, receives ANA
+        if (pranaChange < 0) {
+          spent = TokenAmount(amount: pranaChange.abs(), currency: 'prANA');
+        }
+        if (anaChange > 0) {
+          received = TokenAmount(amount: anaChange, currency: 'ANA');
+        }
+        break;
+
+      case NirvanaTransactionType.claimPrana:
+        // User receives prANA
+        if (pranaChange > 0) {
+          received = TokenAmount(amount: pranaChange, currency: 'prANA');
+        }
+        break;
+
+      case NirvanaTransactionType.unknown:
+        // Try to infer from balance changes
+        if (anaChange > 0) {
+          received = TokenAmount(amount: anaChange, currency: 'ANA');
+        } else if (anaChange < 0) {
+          spent = TokenAmount(amount: anaChange.abs(), currency: 'ANA');
+        }
+        if (nirvChange > 0 && received == null) {
+          received = TokenAmount(amount: nirvChange, currency: 'NIRV');
+        } else if (nirvChange < 0 && spent == null) {
+          spent = TokenAmount(amount: nirvChange.abs(), currency: 'NIRV');
+        }
+        if (usdcChange > 0 && received == null) {
+          received = TokenAmount(amount: usdcChange, currency: 'USDC');
+        } else if (usdcChange < 0 && spent == null) {
+          spent = TokenAmount(amount: usdcChange.abs(), currency: 'USDC');
+        }
+        break;
+    }
+
+    return NirvanaTransaction(
+      signature: signature,
+      type: txType,
+      received: received,
+      spent: spent,
+      timestamp: timestamp,
+      userAddress: userAddress,
+      fee: fee,
+    );
+  }
+
+  NirvanaTransactionType _identifyTransactionType(List<int> discriminator) {
+    if (_listEquals(discriminator, _buyExact2Discriminator)) {
+      return NirvanaTransactionType.buy;
+    }
+    if (_listEquals(discriminator, _sell2Discriminator)) {
+      return NirvanaTransactionType.sell;
+    }
+    if (_listEquals(discriminator, _depositAnaDiscriminator)) {
+      return NirvanaTransactionType.stake;
+    }
+    if (_listEquals(discriminator, _withdrawAnaDiscriminator)) {
+      return NirvanaTransactionType.unstake;
+    }
+    if (_listEquals(discriminator, _borrowNirvDiscriminator)) {
+      return NirvanaTransactionType.borrow;
+    }
+    if (_listEquals(discriminator, _repayDiscriminator)) {
+      return NirvanaTransactionType.repay;
+    }
+    return NirvanaTransactionType.unknown;
+  }
+
+  bool _listEquals(List<int> a, List<int> b) {
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
+  List<int> _decodeBase58(String data) {
+    const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+    var result = BigInt.zero;
+    for (int i = 0; i < data.length; i++) {
+      final index = alphabet.indexOf(data[i]);
+      if (index < 0) return [];
+      result = result * BigInt.from(58) + BigInt.from(index);
+    }
+    final bytes = <int>[];
+    while (result > BigInt.zero) {
+      bytes.insert(0, (result % BigInt.from(256)).toInt());
+      result = result ~/ BigInt.from(256);
+    }
+    // Add leading zeros
+    for (int i = 0; i < data.length && data[i] == '1'; i++) {
+      bytes.insert(0, 0);
+    }
+    return bytes;
+  }
+
+  Map<String, double> _parseBurnMintOperations(List instructions, List innerInstructions) {
+    final changes = <String, double>{};
+
+    void processInstruction(Map<String, dynamic> instruction) {
+      if (instruction['program'] != 'spl-token') return;
+
+      final parsed = instruction['parsed'];
+      if (parsed == null) return;
+
+      final type = parsed['type'] as String?;
+      final info = parsed['info'] as Map<String, dynamic>?;
+      if (info == null) return;
+
+      if (type == 'burn') {
+        final mint = info['mint'] as String?;
+        final amount = info['amount'] as String?;
+        if (mint != null && amount != null) {
+          final rawAmount = int.parse(amount);
+          final uiAmount = rawAmount / 1000000.0;
+          final currency = _mintToCurrency(mint);
+          changes[currency] = (changes[currency] ?? 0.0) - uiAmount;
+        }
+      } else if (type == 'mint' || type == 'mintTo') {
+        final mint = info['mint'] as String?;
+        final amount = info['amount'] as String?;
+        if (mint != null && amount != null) {
+          final rawAmount = int.parse(amount);
+          final uiAmount = rawAmount / 1000000.0;
+          final currency = _mintToCurrency(mint);
+          changes[currency] = (changes[currency] ?? 0.0) + uiAmount;
+        }
+      }
+    }
+
+    for (final instruction in instructions) {
+      if (instruction is Map<String, dynamic>) {
+        processInstruction(instruction);
+      }
+    }
+
+    for (final inner in innerInstructions) {
+      final innerList = inner['instructions'] as List? ?? [];
+      for (final instruction in innerList) {
+        if (instruction is Map<String, dynamic>) {
+          processInstruction(instruction);
+        }
+      }
+    }
+
+    return changes;
+  }
+
+  String _mintToCurrency(String mint) {
+    if (mint == _anaMint) return 'ANA';
+    if (mint == _nirvMint) return 'NIRV';
+    if (mint == _usdcMint) return 'USDC';
+    if (mint == _pranaMint) return 'prANA';
+    return mint.substring(0, 8);
+  }
+
   /// Buy ANA tokens
-  Future<TransactionResult> buyAna(BuyAnaRequest request) async {
+  Future<TransactionResult> buyAna({
+    required String userPubkey,
+    required Ed25519HDKeyPair keypair,
+    required double amount,
+    required bool useNirv,
+    double? minAnaAmount,
+  }) async {
     try {
       // Resolve user accounts
-      final accounts = await _accountResolver.resolveUserAccounts(request.userPubkey);
-      
+      final accounts = await _accountResolver.resolveUserAccounts(userPubkey);
+
       // Validate payment account
-      final paymentAccount = request.useNirv ? accounts.nirvAccount : accounts.usdcAccount;
+      final paymentAccount = useNirv ? accounts.nirvAccount : accounts.usdcAccount;
       if (paymentAccount == null) {
-        throw Exception('User does not have ${request.useNirv ? "NIRV" : "USDC"} token account');
+        throw Exception('User does not have ${useNirv ? "NIRV" : "USDC"} token account');
       }
-      
+
       // Ensure ANA and NIRV accounts exist
       if (accounts.anaAccount == null) {
         throw Exception('User does not have ANA token account');
@@ -712,31 +1016,31 @@ class NirvanaClient {
       if (accounts.nirvAccount == null) {
         throw Exception('User does not have NIRV token account');
       }
-      
+
       // Convert amount to lamports (6 decimals)
-      final amountLamports = (request.amount * 1000000).toInt();
-      final minAnaLamports = request.minAnaAmount != null 
-          ? (request.minAnaAmount! * 1000000).toInt() 
+      final amountLamports = (amount * 1000000).toInt();
+      final minAnaLamports = minAnaAmount != null
+          ? (minAnaAmount * 1000000).toInt()
           : 0;
-      
+
       // Build buy instruction
       final instruction = _transactionBuilder.buildBuyExact2Instruction(
-        userPubkey: request.userPubkey,
+        userPubkey: userPubkey,
         userPaymentAccount: paymentAccount,
         userAnaAccount: accounts.anaAccount!,
         userNirvAccount: accounts.nirvAccount!,
         amountLamports: amountLamports,
-        useNirv: request.useNirv,
+        useNirv: useNirv,
         minAnaLamports: minAnaLamports,
       );
-      
+
       // Create and send transaction
       final message = Message(instructions: [instruction]);
       final signature = await _rpcClient.sendAndConfirmTransaction(
         message: message,
-        signers: [request.keypair],
+        signers: [keypair],
       );
-      
+
       return TransactionResult.success(
         signature: signature,
         logs: ['Buy ANA transaction successful'],
@@ -750,11 +1054,16 @@ class NirvanaClient {
   }
   
   /// Sell ANA tokens
-  Future<TransactionResult> sellAna(SellAnaRequest request) async {
+  Future<TransactionResult> sellAna({
+    required String userPubkey,
+    required Ed25519HDKeyPair keypair,
+    required double anaAmount,
+    double? minUsdcAmount,
+  }) async {
     try {
       // Resolve user accounts
-      final accounts = await _accountResolver.resolveUserAccounts(request.userPubkey);
-      
+      final accounts = await _accountResolver.resolveUserAccounts(userPubkey);
+
       // Validate accounts
       if (accounts.anaAccount == null) {
         throw Exception('User does not have ANA token account');
@@ -765,29 +1074,29 @@ class NirvanaClient {
       if (accounts.nirvAccount == null) {
         throw Exception('User does not have NIRV token account');
       }
-      
+
       // Convert amount to lamports (6 decimals)
-      final anaLamports = (request.anaAmount * 1000000).toInt();
-      final minUsdcLamports = request.minUsdcAmount != null 
-          ? (request.minUsdcAmount! * 1000000).toInt() 
+      final anaLamports = (anaAmount * 1000000).toInt();
+      final minUsdcLamports = minUsdcAmount != null
+          ? (minUsdcAmount * 1000000).toInt()
           : 0;
-      
+
       // Build sell instruction (sell2 - sells ANA for USDC)
       final instruction = _transactionBuilder.buildSellInstruction(
-        userPubkey: request.userPubkey,
+        userPubkey: userPubkey,
         userAnaAccount: accounts.anaAccount!,
         userUsdcAccount: accounts.usdcAccount!,
         anaLamports: anaLamports,
         minUsdcLamports: minUsdcLamports,
       );
-      
+
       // Create and send transaction
       final message = Message(instructions: [instruction]);
       final signature = await _rpcClient.sendAndConfirmTransaction(
         message: message,
-        signers: [request.keypair],
+        signers: [keypair],
       );
-      
+
       return TransactionResult.success(
         signature: signature,
         logs: ['Sell ANA transaction successful'],
@@ -801,42 +1110,46 @@ class NirvanaClient {
   }
   
   /// Stake ANA tokens
-  Future<TransactionResult> stakeAna(StakeAnaRequest request) async {
+  Future<TransactionResult> stakeAna({
+    required String userPubkey,
+    required Ed25519HDKeyPair keypair,
+    required double anaAmount,
+  }) async {
     try {
       // Find personal account
-      var personalAccount = await _accountResolver.findPersonalAccount(request.userPubkey);
+      var personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
       if (personalAccount == null) {
         // Initialize personal account first
         personalAccount = await initializePersonalAccount(
-          userPubkey: request.userPubkey,
-          keypair: request.keypair,
+          userPubkey: userPubkey,
+          keypair: keypair,
         );
       }
-      
+
       // Resolve user accounts
-      final accounts = await _accountResolver.resolveUserAccounts(request.userPubkey);
+      final accounts = await _accountResolver.resolveUserAccounts(userPubkey);
       if (accounts.anaAccount == null) {
         throw Exception('User does not have ANA token account');
       }
-      
+
       // Convert amount to lamports
-      final anaLamports = (request.anaAmount * 1000000).toInt();
-      
+      final anaLamports = (anaAmount * 1000000).toInt();
+
       // Build stake instruction
       final instruction = _transactionBuilder.buildDepositAnaInstruction(
-        userPubkey: request.userPubkey,
+        userPubkey: userPubkey,
         userAnaAccount: accounts.anaAccount!,
         personalAccount: personalAccount,
         anaLamports: anaLamports,
       );
-      
+
       // Create and send transaction
       final message = Message(instructions: [instruction]);
       final signature = await _rpcClient.sendAndConfirmTransaction(
         message: message,
-        signers: [request.keypair],
+        signers: [keypair],
       );
-      
+
       return TransactionResult.success(
         signature: signature,
         logs: ['Stake ANA transaction successful'],
