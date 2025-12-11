@@ -32,6 +32,7 @@ class NirvanaClient {
   static const List<int> _withdrawAnaDiscriminator = [93, 87, 203, 252, 78, 187, 97, 82];
   static const List<int> _borrowNirvDiscriminator = [155, 1, 43, 62, 79, 104, 66, 42];
   static const List<int> _repayDiscriminator = [28, 158, 130, 191, 125, 127, 195, 94];
+  static const List<int> _realizeDiscriminator = [64, 34, 113, 17, 141, 79, 61, 38];
 
   final SolanaRpcClient _rpcClient;
   final NirvanaTransactionBuilder _transactionBuilder;
@@ -819,8 +820,8 @@ class NirvanaClient {
     }
 
     // Determine received and sent based on transaction type and balance changes
-    TokenAmount? received;
-    TokenAmount? sent;
+    final List<TokenAmount> receivedList = [];
+    final List<TokenAmount> sentList = [];
     TokenAmount? fee;
 
     // Build fee TokenAmount from the first fee found (there's typically only one fee per transaction)
@@ -838,12 +839,12 @@ class NirvanaClient {
         // User receives ANA, sends NIRV or USDC
         // Fee is minted to treasury in ANA (different currency from sent)
         if (anaChange > 0) {
-          received = TokenAmount(amount: anaChange, currency: 'ANA');
+          receivedList.add(TokenAmount(amount: anaChange, currency: 'ANA'));
         }
         if (nirvChange < 0) {
-          sent = TokenAmount(amount: nirvChange.abs(), currency: 'NIRV');
+          sentList.add(TokenAmount(amount: nirvChange.abs(), currency: 'NIRV'));
         } else if (usdcChange < 0) {
-          sent = TokenAmount(amount: usdcChange.abs(), currency: 'USDC');
+          sentList.add(TokenAmount(amount: usdcChange.abs(), currency: 'USDC'));
         }
         fee = buildFeeFromTransfers(feeTransfers);
         break;
@@ -852,12 +853,12 @@ class NirvanaClient {
         // User sends ANA, receives USDC or NIRV
         // Fee is taken from the ANA being sold
         if (anaChange < 0) {
-          sent = TokenAmount(amount: anaChange.abs(), currency: 'ANA');
+          sentList.add(TokenAmount(amount: anaChange.abs(), currency: 'ANA'));
         }
         if (usdcChange > 0) {
-          received = TokenAmount(amount: usdcChange, currency: 'USDC');
+          receivedList.add(TokenAmount(amount: usdcChange, currency: 'USDC'));
         } else if (nirvChange > 0) {
-          received = TokenAmount(amount: nirvChange, currency: 'NIRV');
+          receivedList.add(TokenAmount(amount: nirvChange, currency: 'NIRV'));
         }
         fee = buildFeeFromTransfers(feeTransfers);
         break;
@@ -865,14 +866,14 @@ class NirvanaClient {
       case NirvanaTransactionType.stake:
         // User sends ANA (transfers to vault)
         if (anaChange < 0) {
-          sent = TokenAmount(amount: anaChange.abs(), currency: 'ANA');
+          sentList.add(TokenAmount(amount: anaChange.abs(), currency: 'ANA'));
         }
         break;
 
       case NirvanaTransactionType.unstake:
         // User receives ANA (from vault), may have ANA fee
         if (anaChange > 0) {
-          received = TokenAmount(amount: anaChange, currency: 'ANA');
+          receivedList.add(TokenAmount(amount: anaChange, currency: 'ANA'));
         }
         fee = buildFeeFromTransfers(feeTransfers);
         break;
@@ -880,7 +881,7 @@ class NirvanaClient {
       case NirvanaTransactionType.borrow:
         // User receives NIRV (minted), fee is also minted in NIRV to escrow
         if (nirvChange > 0) {
-          received = TokenAmount(amount: nirvChange, currency: 'NIRV');
+          receivedList.add(TokenAmount(amount: nirvChange, currency: 'NIRV'));
         }
         fee = buildFeeFromTransfers(feeTransfers);
         break;
@@ -888,43 +889,48 @@ class NirvanaClient {
       case NirvanaTransactionType.repay:
         // User sends NIRV (burned to repay debt)
         if (nirvChange < 0) {
-          sent = TokenAmount(amount: nirvChange.abs(), currency: 'NIRV');
+          sentList.add(TokenAmount(amount: nirvChange.abs(), currency: 'NIRV'));
         }
         break;
 
       case NirvanaTransactionType.realize:
-        // User sends prANA, receives ANA
+        // User sends prANA + NIRV/USDC, receives ANA
         if (pranaChange < 0) {
-          sent = TokenAmount(amount: pranaChange.abs(), currency: 'prANA');
+          sentList.add(TokenAmount(amount: pranaChange.abs(), currency: 'prANA'));
+        }
+        if (nirvChange < 0) {
+          sentList.add(TokenAmount(amount: nirvChange.abs(), currency: 'NIRV'));
+        } else if (usdcChange < 0) {
+          sentList.add(TokenAmount(amount: usdcChange.abs(), currency: 'USDC'));
         }
         if (anaChange > 0) {
-          received = TokenAmount(amount: anaChange, currency: 'ANA');
+          receivedList.add(TokenAmount(amount: anaChange, currency: 'ANA'));
         }
         break;
 
       case NirvanaTransactionType.claimPrana:
         // User receives prANA
         if (pranaChange > 0) {
-          received = TokenAmount(amount: pranaChange, currency: 'prANA');
+          receivedList.add(TokenAmount(amount: pranaChange, currency: 'prANA'));
         }
         break;
 
       case NirvanaTransactionType.unknown:
         // Try to infer from balance changes
         if (anaChange > 0) {
-          received = TokenAmount(amount: anaChange, currency: 'ANA');
+          receivedList.add(TokenAmount(amount: anaChange, currency: 'ANA'));
         } else if (anaChange < 0) {
-          sent = TokenAmount(amount: anaChange.abs(), currency: 'ANA');
+          sentList.add(TokenAmount(amount: anaChange.abs(), currency: 'ANA'));
         }
-        if (nirvChange > 0 && received == null) {
-          received = TokenAmount(amount: nirvChange, currency: 'NIRV');
-        } else if (nirvChange < 0 && sent == null) {
-          sent = TokenAmount(amount: nirvChange.abs(), currency: 'NIRV');
+        if (nirvChange > 0 && receivedList.isEmpty) {
+          receivedList.add(TokenAmount(amount: nirvChange, currency: 'NIRV'));
+        } else if (nirvChange < 0 && sentList.isEmpty) {
+          sentList.add(TokenAmount(amount: nirvChange.abs(), currency: 'NIRV'));
         }
-        if (usdcChange > 0 && received == null) {
-          received = TokenAmount(amount: usdcChange, currency: 'USDC');
-        } else if (usdcChange < 0 && sent == null) {
-          sent = TokenAmount(amount: usdcChange.abs(), currency: 'USDC');
+        if (usdcChange > 0 && receivedList.isEmpty) {
+          receivedList.add(TokenAmount(amount: usdcChange, currency: 'USDC'));
+        } else if (usdcChange < 0 && sentList.isEmpty) {
+          sentList.add(TokenAmount(amount: usdcChange.abs(), currency: 'USDC'));
         }
         fee = buildFeeFromTransfers(feeTransfers);
         break;
@@ -933,8 +939,8 @@ class NirvanaClient {
     return NirvanaTransaction(
       signature: signature,
       type: txType,
-      received: received,
-      sent: sent,
+      received: receivedList,
+      sent: sentList,
       fee: fee,
       timestamp: timestamp,
       userAddress: userAddress,
@@ -959,6 +965,9 @@ class NirvanaClient {
     }
     if (_listEquals(discriminator, _repayDiscriminator)) {
       return NirvanaTransactionType.repay;
+    }
+    if (_listEquals(discriminator, _realizeDiscriminator)) {
+      return NirvanaTransactionType.realize;
     }
     return NirvanaTransactionType.unknown;
   }
@@ -1500,13 +1509,63 @@ class NirvanaClient {
     }
   }
   
+  /// Realize prANA tokens to ANA by paying with USDC or NIRV
+  /// Converts prANA to ANA at current prices
   Future<TransactionResult> realizePrana({
     required String userPubkey,
     required Ed25519HDKeyPair keypair,
     required double pranaAmount,
+    bool useNirv = false,
   }) async {
-    // TODO: Implement
-    throw UnimplementedError('realizePrana not yet implemented');
+    try {
+      // Resolve user accounts
+      final accounts = await _accountResolver.resolveUserAccounts(userPubkey);
+      if (accounts.pranaAccount == null) {
+        throw Exception('User does not have prANA token account');
+      }
+      if (accounts.nirvAccount == null) {
+        throw Exception('User does not have NIRV token account');
+      }
+      if (accounts.anaAccount == null) {
+        throw Exception('User does not have ANA token account');
+      }
+
+      // Check USDC account is needed when not using NIRV
+      if (!useNirv && accounts.usdcAccount == null) {
+        throw Exception('User does not have USDC token account');
+      }
+
+      // Convert to lamports (prANA has 6 decimals)
+      final pranaLamports = (pranaAmount * 1000000).toInt();
+
+      // Build realize instruction
+      final instruction = _transactionBuilder.buildRealizeInstruction(
+        userPubkey: userPubkey,
+        userPranaAccount: accounts.pranaAccount!,
+        userNirvAccount: accounts.nirvAccount!,
+        userUsdcAccount: accounts.usdcAccount ?? '', // Only used when not useNirv
+        userAnaAccount: accounts.anaAccount!,
+        pranaLamports: pranaLamports,
+        useNirv: useNirv,
+      );
+
+      // Create and send transaction
+      final message = Message(instructions: [instruction]);
+      final signature = await _rpcClient.sendAndConfirmTransaction(
+        message: message,
+        signers: [keypair],
+      );
+
+      return TransactionResult.success(
+        signature: signature,
+        logs: ['Realize prANA transaction successful - converted $pranaAmount prANA'],
+      );
+    } catch (e) {
+      return TransactionResult.failure(
+        signature: '',
+        error: e.toString(),
+      );
+    }
   }
 }
 

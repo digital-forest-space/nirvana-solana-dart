@@ -53,8 +53,12 @@ void main(List<String> args) async {
     if (verbose) {
       print('');
       print('  Type: ${tx.type.name.toUpperCase()}');
-      if (tx.sent != null) print('  Sent: ${tx.sent!.amount.toStringAsFixed(6)} ${tx.sent!.currency}');
-      if (tx.received != null) print('  Received: ${tx.received!.amount.toStringAsFixed(6)} ${tx.received!.currency}');
+      for (final s in tx.sent) {
+        print('  Sent: ${s.amount.toStringAsFixed(6)} ${s.currency}');
+      }
+      for (final r in tx.received) {
+        print('  Received: ${r.amount.toStringAsFixed(6)} ${r.currency}');
+      }
       if (tx.fee != null) print('  Fee: ${tx.fee!.amount.toStringAsFixed(6)} ${tx.fee!.currency}');
       if (tx.pricePerAna != null) print('  Price: \$${tx.pricePerAna!.toStringAsFixed(6)} per ANA');
       print('  Timestamp: ${tx.timestamp.toIso8601String()}');

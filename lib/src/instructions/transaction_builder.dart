@@ -259,6 +259,60 @@ class NirvanaTransactionBuilder {
     );
   }
 
+  /// Build realize prANA instruction (converts prANA to ANA by paying USDC or NIRV)
+  /// Based on Chrome injection analysis of actual realize transactions
+  Instruction buildRealizeInstruction({
+    required String userPubkey,
+    required String userPranaAccount,
+    required String userNirvAccount,
+    required String userUsdcAccount, // USDC account (used when NOT useNirv)
+    required String userAnaAccount,
+    required int pranaLamports,
+    required bool useNirv,
+  }) {
+    // realize discriminator (confirmed from Chrome injection analysis)
+    final discriminator = [64, 34, 113, 17, 141, 79, 61, 38];
+
+    // Build instruction data
+    final pranaBytes = Uint8List(8);
+    pranaBytes.buffer.asByteData().setUint64(0, pranaLamports, Endian.little);
+
+    final instructionData = [
+      ...discriminator,
+      ...pranaBytes,
+    ];
+
+    // Build accounts in exact order from Chrome injection analysis (15 accounts)
+    // Comparing realize_prANA.log (USDC) vs realize_ana_with_nirv.log (NIRV):
+    // 0: user, 1: tenant, 2: priceCurve, 3: ANA mint, 4: USDC mint, 5: NIRV mint
+    // 6: prANA mint, 7: CONDITIONAL (USDC: userUsdcAccount, NIRV: userNirvAccount)
+    // 8: userPranaAccount (burn source), 9: userAnaAccount (destination)
+    // 10: escrowRevNirv, 11: tenantUsdcVault, 12: tenantAnaVault, 13-14: tokenProgram
+    final accounts = [
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userPubkey), isSigner: true, isWriteable: true),              // 0: user/signer
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.tenantAccount), isSigner: false, isWriteable: true),  // 1: tenant
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.priceCurve), isSigner: false, isWriteable: true),     // 2: price curve
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.anaMint), isSigner: false, isWriteable: true),        // 3: ANA mint
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.usdcMint), isSigner: false, isWriteable: false),      // 4: USDC mint
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.nirvMint), isSigner: false, isWriteable: true),       // 5: NIRV mint
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.pranaMint), isSigner: false, isWriteable: true),      // 6: prANA mint
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(useNirv ? userNirvAccount : userUsdcAccount), isSigner: false, isWriteable: true), // 7: CONDITIONAL payment source
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userPranaAccount), isSigner: false, isWriteable: true),       // 8: user prANA account (burn source)
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userAnaAccount), isSigner: false, isWriteable: true),         // 9: user ANA account (destination)
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.escrowRevNirv), isSigner: false, isWriteable: true),  // 10: escrow revenue NIRV
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.tenantUsdcVault), isSigner: false, isWriteable: true), // 11: tenant USDC vault
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.tenantAnaVault), isSigner: false, isWriteable: true), // 12: tenant ANA vault
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(tokenProgram), isSigner: false, isWriteable: false),          // 13: token program
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(tokenProgram), isSigner: false, isWriteable: false),          // 14: token program (duplicate)
+    ];
+
+    return Instruction(
+      programId: Ed25519HDPublicKey.fromBase58(_config.programId),
+      accounts: accounts,
+      data: ByteArray(Uint8List.fromList(instructionData)),
+    );
+  }
+
   /// Build repay instruction (repays NIRV debt by burning NIRV)
   /// Based on Chrome injection analysis of actual repay transactions
   Instruction buildRepayInstruction({

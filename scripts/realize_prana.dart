@@ -3,24 +3,27 @@ import 'dart:io';
 import 'package:nirvana_solana/nirvana_solana.dart';
 import 'package:solana/solana.dart';
 
-/// Execute a buy ANA transaction
+/// Execute a realize prANA transaction (convert prANA to ANA)
 ///
-/// Usage: dart scripts/buy_ana.dart <keypair_path> <amount> [--nirv|--usdc] [--rpc <url>] [--verbose]
+/// Usage: dart scripts/realize_prana.dart <keypair_path> <prana_amount> [--nirv] [--rpc <url>] [--verbose]
 ///
 /// Examples:
-///   dart scripts/buy_ana.dart ~/.config/solana/id.json 10 --nirv
-///   dart scripts/buy_ana.dart ~/.config/solana/id.json 10 --usdc --verbose
+///   dart scripts/realize_prana.dart ~/.config/solana/id.json 0.5
+///   dart scripts/realize_prana.dart ~/.config/solana/id.json 0.5 --nirv --verbose
+///
+/// Options:
+///   --nirv     Pay with NIRV instead of USDC (default is USDC)
+///   --verbose  Show detailed output before JSON result
 ///
 /// Environment:
 ///   SOLANA_RPC_URL - RPC endpoint (default: https://api.mainnet-beta.solana.com)
 
 void main(List<String> args) async {
   if (args.length < 2) {
-    print('Usage: dart scripts/buy_ana.dart <keypair_path> <amount> [--nirv|--usdc] [--rpc <url>] [--verbose]');
+    print('Usage: dart scripts/realize_prana.dart <keypair_path> <prana_amount> [--nirv] [--rpc <url>] [--verbose]');
     print('');
     print('Options:');
-    print('  --nirv       Pay with NIRV (default)');
-    print('  --usdc       Pay with USDC');
+    print('  --nirv     Pay with NIRV instead of USDC (default is USDC)');
     print('  --rpc <url>  Custom RPC endpoint');
     print('  --verbose    Show detailed output before JSON result');
     print('');
@@ -30,13 +33,11 @@ void main(List<String> args) async {
   }
 
   final keypairPath = args[0];
-  final amount = double.tryParse(args[1]);
+  final pranaAmount = double.tryParse(args[1]);
 
-  // Parse flags - default to NIRV if neither specified
-  final useUsdc = args.any((a) => a.toLowerCase() == '--usdc');
-  final useNirv = !useUsdc;
+  // Parse flags
+  final useNirv = args.any((a) => a.toLowerCase() == '--nirv');
   final verbose = args.any((a) => a.toLowerCase() == '--verbose');
-  final paymentCurrency = useNirv ? 'NIRV' : 'USDC';
 
   // Parse RPC URL from --rpc flag or environment
   String rpcUrl = Platform.environment['SOLANA_RPC_URL'] ?? 'https://api.mainnet-beta.solana.com';
@@ -45,7 +46,7 @@ void main(List<String> args) async {
     rpcUrl = args[rpcIndex + 1];
   }
 
-  if (amount == null || amount <= 0) {
+  if (pranaAmount == null || pranaAmount <= 0) {
     print(jsonEncode({'success': false, 'error': 'Invalid amount: ${args[1]}'}));
     exit(1);
   }
@@ -72,31 +73,25 @@ void main(List<String> args) async {
   final rpcClient = DefaultSolanaRpcClient(solanaClient, rpcUrl: Uri.parse(rpcUrl));
   final client = NirvanaClient(rpcClient: rpcClient);
 
-  // Show current prices
-  if (verbose) print('\nFetching current floor price...');
-  final floorPrice = await client.fetchFloorPrice();
-  if (verbose) print('  Floor price: \$${floorPrice.toStringAsFixed(6)}');
-
-  // Estimate ANA to receive
-  final estimatedAna = amount / floorPrice * 0.97;
+  final paymentCurrency = useNirv ? 'NIRV' : 'USDC';
   if (verbose) {
     print('\nTransaction:');
-    print('  Spending: $amount $paymentCurrency');
-    print('  Estimated ANA: ${estimatedAna.toStringAsFixed(6)} ANA (after ~3% fee)');
-    print('\nExecuting buy transaction...');
+    print('  Realizing: $pranaAmount prANA');
+    print('  Payment: $paymentCurrency');
+    print('\nExecuting realize transaction...');
   }
 
-  // Execute buy
-  final result = await client.buyAna(
+  // Execute realize
+  final result = await client.realizePrana(
     userPubkey: userPubkey,
     keypair: keypair,
-    amount: amount,
+    pranaAmount: pranaAmount,
     useNirv: useNirv,
   );
 
   if (result.success) {
     if (verbose) {
-      print('\n✅ Buy successful!');
+      print('\n✅ Realize successful!');
       print('  Signature: ${result.signature}');
       print('  Explorer: https://solscan.io/tx/${result.signature}');
       print('\nParsing transaction...');
@@ -113,8 +108,6 @@ void main(List<String> args) async {
         for (final r in tx.received) {
           print('  Received: ${r.amount.toStringAsFixed(6)} ${r.currency}');
         }
-        if (tx.fee != null) print('  Fee: ${tx.fee!.amount.toStringAsFixed(6)} ${tx.fee!.currency}');
-        if (tx.pricePerAna != null) print('  Price: \$${tx.pricePerAna!.toStringAsFixed(6)} per ANA');
         print('');
       }
 
@@ -130,7 +123,7 @@ void main(List<String> args) async {
     }
   } else {
     if (verbose) {
-      print('\n❌ Buy failed!');
+      print('\n❌ Realize failed!');
       print('  Error: ${result.error}');
     }
     print(jsonEncode({'success': false, 'error': result.error}));

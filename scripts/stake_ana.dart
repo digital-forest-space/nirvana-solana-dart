@@ -97,7 +97,9 @@ void main(List<String> args) async {
       final tx = await client.parseTransaction(result.signature);
       if (verbose) {
         print('  Type: ${tx.type.name.toUpperCase()}');
-        if (tx.sent != null) print('  Staked: ${tx.sent!.amount.toStringAsFixed(6)} ${tx.sent!.currency}');
+        for (final s in tx.sent) {
+          print('  Staked: ${s.amount.toStringAsFixed(6)} ${s.currency}');
+        }
         print('');
       }
 
