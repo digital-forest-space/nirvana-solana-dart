@@ -382,4 +382,40 @@ class NirvanaTransactionBuilder {
       data: ByteArray(Uint8List.fromList(instructionData)),
     );
   }
+
+  /// Build claim revenue share instruction (claims accumulated ANA + NIRV revenue)
+  /// Based on Chrome injection analysis of actual claim revenue share transactions
+  Instruction buildClaimRevenueShareInstruction({
+    required String userPubkey,
+    required String personalAccount,
+    required String userAnaAccount,
+    required String userNirvAccount,
+  }) {
+    // claim_revenue_share discriminator (from browser injection log)
+    final discriminator = [69, 140, 105, 250, 40, 226, 233, 116];
+
+    // No amount parameter - claims all available revenue share
+    final instructionData = [...discriminator];
+
+    // Build accounts in exact order from Chrome injection analysis (8 accounts)
+    // Instruction 4 from claim_revenue_share log:
+    // 0: user (signer), 1: personalAccount, 2: tenant, 3: escrowNirvAccount,
+    // 4: escrowRevNirv, 5: userAnaAccount, 6: userNirvAccount, 7: tokenProgram
+    final accounts = [
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userPubkey), isSigner: true, isWriteable: true),                 // 0: user/signer
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(personalAccount), isSigner: false, isWriteable: true),           // 1: personal account
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.tenantAccount), isSigner: false, isWriteable: true),     // 2: tenant
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.escrowNirvAccount), isSigner: false, isWriteable: true), // 3: escrow NIRV account
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.escrowRevNirv), isSigner: false, isWriteable: true),     // 4: escrow rev NIRV (ANA fees)
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userAnaAccount), isSigner: false, isWriteable: true),            // 5: user ANA account
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userNirvAccount), isSigner: false, isWriteable: true),           // 6: user NIRV account
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(tokenProgram), isSigner: false, isWriteable: false),             // 7: token program
+    ];
+
+    return Instruction(
+      programId: Ed25519HDPublicKey.fromBase58(_config.programId),
+      accounts: accounts,
+      data: ByteArray(Uint8List.fromList(instructionData)),
+    );
+  }
 }

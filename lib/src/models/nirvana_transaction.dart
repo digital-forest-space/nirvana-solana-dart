@@ -10,6 +10,7 @@ enum NirvanaTransactionType {
   repay,
   realize,
   claimPrana,
+  claimRevenueShare,
   unknown,
 }
 
