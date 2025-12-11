@@ -1,38 +1,41 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:nirvana_solana/nirvana_solana.dart';
 import 'package:solana/solana.dart';
 
-/// Borrow NIRV against staked ANA collateral
+/// Execute a borrow NIRV transaction
 ///
-/// Usage: dart scripts/borrow_nirv.dart <keypair_path> <nirv_amount> [--rpc <url>]
+/// Usage: dart scripts/borrow_nirv.dart <keypair_path> <nirv_amount> [--rpc <url>] [--verbose]
 ///
 /// Examples:
-///   dart scripts/borrow_nirv.dart ~/.config/solana/id.json 1.0
-///   dart scripts/borrow_nirv.dart ~/.config/solana/id.json 1.0 --rpc https://my-rpc.com
+///   dart scripts/borrow_nirv.dart ~/.config/solana/id.json 1.5
+///   dart scripts/borrow_nirv.dart ~/.config/solana/id.json 1.5 --verbose
 ///
 /// Environment:
 ///   SOLANA_RPC_URL - RPC endpoint (default: https://api.mainnet-beta.solana.com)
+///
+/// Note: You must have staked ANA to borrow NIRV. Debt limit = stakedANA * floorPrice
 
 void main(List<String> args) async {
   if (args.length < 2) {
-    print('Usage: dart scripts/borrow_nirv.dart <keypair_path> <nirv_amount> [--rpc <url>]');
-    print('');
-    print('Borrow NIRV tokens against your staked ANA collateral.');
-    print('Requires an existing PersonalAccount with staked ANA.');
+    print('Usage: dart scripts/borrow_nirv.dart <keypair_path> <nirv_amount> [--rpc <url>] [--verbose]');
     print('');
     print('Options:');
     print('  --rpc <url>  Custom RPC endpoint');
+    print('  --verbose    Show detailed output before JSON result');
     print('');
     print('Environment:');
     print('  SOLANA_RPC_URL  RPC endpoint (overridden by --rpc)');
     print('');
-    print('Examples:');
-    print('  dart scripts/borrow_nirv.dart ~/.config/solana/id.json 1.0');
+    print('Note: You must have staked ANA to borrow NIRV.');
     exit(1);
   }
 
   final keypairPath = args[0];
   final nirvAmount = double.tryParse(args[1]);
+
+  // Parse flags
+  final verbose = args.any((a) => a.toLowerCase() == '--verbose');
 
   // Parse RPC URL from --rpc flag or environment
   String rpcUrl = Platform.environment['SOLANA_RPC_URL'] ?? 'https://api.mainnet-beta.solana.com';
@@ -42,44 +45,43 @@ void main(List<String> args) async {
   }
 
   if (nirvAmount == null || nirvAmount <= 0) {
-    print('Error: Invalid amount: ${args[1]}');
+    print(jsonEncode({'success': false, 'error': 'Invalid amount: ${args[1]}'}));
     exit(1);
   }
 
   // Load keypair
   final keypairFile = File(keypairPath);
   if (!keypairFile.existsSync()) {
-    print('Error: Keypair file not found: $keypairPath');
+    print(jsonEncode({'success': false, 'error': 'Keypair file not found: $keypairPath'}));
     exit(1);
   }
 
-  print('Loading keypair from $keypairPath...');
+  if (verbose) print('Loading keypair from $keypairPath...');
   final keypairJson = keypairFile.readAsStringSync();
   final keypairBytes = (RegExp(r'\d+').allMatches(keypairJson).map((m) => int.parse(m.group(0)!)).toList());
   final keypair = await Ed25519HDKeyPair.fromPrivateKeyBytes(
     privateKey: keypairBytes.sublist(0, 32),
   );
   final userPubkey = keypair.publicKey.toBase58();
-  print('Wallet: $userPubkey');
+  if (verbose) print('Wallet: $userPubkey');
 
-  // Create client using rpcUrl from args/env (parsed above)
-  print('RPC: $rpcUrl');
+  // Create client
+  if (verbose) print('RPC: $rpcUrl');
   final solanaClient = SolanaClient(rpcUrl: Uri.parse(rpcUrl), websocketUrl: Uri.parse(rpcUrl.replaceFirst('https', 'wss')));
   final rpcClient = DefaultSolanaRpcClient(solanaClient, rpcUrl: Uri.parse(rpcUrl));
   final client = NirvanaClient(rpcClient: rpcClient);
 
   // Show current prices
-  print('\nFetching current floor price...');
+  if (verbose) print('\nFetching current floor price...');
   final floorPrice = await client.fetchFloorPrice();
-  print('  Floor price: \$${floorPrice.toStringAsFixed(6)}');
-
-  // Show transaction details
-  print('\nTransaction:');
-  print('  Borrowing: $nirvAmount NIRV');
-  print('  Collateral required: ~${(nirvAmount / floorPrice).toStringAsFixed(6)} ANA (at floor price)');
+  if (verbose) {
+    print('  Floor price: \$${floorPrice.toStringAsFixed(6)}');
+    print('\nTransaction:');
+    print('  Borrowing: $nirvAmount NIRV');
+    print('\nExecuting borrow transaction...');
+  }
 
   // Execute borrow
-  print('\nExecuting borrow transaction...');
   final result = await client.borrowNirv(
     userPubkey: userPubkey,
     keypair: keypair,
@@ -87,23 +89,46 @@ void main(List<String> args) async {
   );
 
   if (result.success) {
-    print('\n✅ Borrow successful!');
-    print('  Signature: ${result.signature}');
-    print('  Explorer: https://solscan.io/tx/${result.signature}');
+    if (verbose) {
+      print('\n✅ Borrow successful!');
+      print('  Signature: ${result.signature}');
+      print('  Explorer: https://solscan.io/tx/${result.signature}');
+      print('\nParsing transaction...');
+    }
 
-    // Parse the transaction to show actual amounts (with retry)
-    print('\nParsing transaction...');
+    // Parse the transaction
     try {
       final tx = await client.parseTransaction(result.signature);
-      print('  Type: ${tx.type.name.toUpperCase()}');
-      if (tx.received != null) {
-        print('  Borrowed: ${tx.received!.amount.toStringAsFixed(6)} ${tx.received!.currency}');
+      if (verbose) {
+        print('  Type: ${tx.type.name.toUpperCase()}');
+        if (tx.received != null) print('  Borrowed: ${tx.received!.amount.toStringAsFixed(6)} ${tx.received!.currency}');
+        print('');
       }
+
+      // Output JSON result
+      print(jsonEncode({
+        'success': true,
+        'signature': result.signature,
+        'type': tx.type.name,
+        'borrowed': tx.received != null ? {'amount': tx.received!.amount, 'currency': tx.received!.currency} : null,
+        'timestamp': tx.timestamp.toIso8601String(),
+        'userAddress': tx.userAddress,
+        'explorer': 'https://solscan.io/tx/${result.signature}',
+      }));
     } catch (e) {
-      print('  (Could not parse transaction: $e)');
+      print(jsonEncode({
+        'success': true,
+        'signature': result.signature,
+        'parseError': e.toString(),
+        'explorer': 'https://solscan.io/tx/${result.signature}',
+      }));
     }
   } else {
-    print('\n❌ Borrow failed!');
-    print('  Error: ${result.error}');
+    if (verbose) {
+      print('\n❌ Borrow failed!');
+      print('  Error: ${result.error}');
+    }
+    print(jsonEncode({'success': false, 'error': result.error}));
+    exit(1);
   }
 }

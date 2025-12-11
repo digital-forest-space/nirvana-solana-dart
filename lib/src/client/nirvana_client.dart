@@ -288,11 +288,17 @@ class NirvanaClient {
       }
     }
 
-    // Calculate fee amounts
+    // Calculate fee amounts per currency
     double anaFee = 0.0;
+    double nirvFee = 0.0;
+    double usdcFee = 0.0;
     for (final entry in feeChanges.entries) {
       if (entry.key.contains(_anaMint)) {
         anaFee += entry.value.abs();
+      } else if (entry.key.contains(_nirvMint)) {
+        nirvFee += entry.value.abs();
+      } else if (entry.key.contains(_usdcMint)) {
+        usdcFee += entry.value.abs();
       }
     }
 
@@ -773,6 +779,7 @@ class NirvanaClient {
     // Parse inner instructions for burn/mint operations (fallback if balance changes are 0)
     final innerInstructions = meta['innerInstructions'] as List? ?? [];
     final burnMintChanges = _parseBurnMintOperations(instructions, innerInstructions);
+    final feeTransfers = _parseFeeTransfers(instructions, innerInstructions);
 
     if (anaChange == 0.0) {
       anaChange = burnMintChanges['ANA'] ?? 0.0;
@@ -784,11 +791,22 @@ class NirvanaClient {
     // Determine received and spent based on transaction type and balance changes
     TokenAmount? received;
     TokenAmount? spent;
-    double? fee;
+    TokenAmount? fee;
+
+    // Build fee TokenAmount from the first fee found (there's typically only one fee per transaction)
+    TokenAmount? buildFeeFromTransfers(Map<String, double> fees) {
+      for (final entry in fees.entries) {
+        if (entry.value > 0) {
+          return TokenAmount(amount: entry.value, currency: entry.key);
+        }
+      }
+      return null;
+    }
 
     switch (txType) {
       case NirvanaTransactionType.buy:
         // User receives ANA, spends NIRV or USDC
+        // Fee is minted to treasury in ANA (different currency from spent)
         if (anaChange > 0) {
           received = TokenAmount(amount: anaChange, currency: 'ANA');
         }
@@ -797,16 +815,21 @@ class NirvanaClient {
         } else if (usdcChange < 0) {
           spent = TokenAmount(amount: usdcChange.abs(), currency: 'USDC');
         }
+        fee = buildFeeFromTransfers(feeTransfers);
         break;
 
       case NirvanaTransactionType.sell:
-        // User spends ANA, receives USDC
+        // User spends ANA, receives USDC or NIRV
+        // Fee is taken from the ANA being sold
         if (anaChange < 0) {
           spent = TokenAmount(amount: anaChange.abs(), currency: 'ANA');
         }
         if (usdcChange > 0) {
           received = TokenAmount(amount: usdcChange, currency: 'USDC');
+        } else if (nirvChange > 0) {
+          received = TokenAmount(amount: nirvChange, currency: 'NIRV');
         }
+        fee = buildFeeFromTransfers(feeTransfers);
         break;
 
       case NirvanaTransactionType.stake:
@@ -817,10 +840,11 @@ class NirvanaClient {
         break;
 
       case NirvanaTransactionType.unstake:
-        // User receives ANA (from vault)
+        // User receives ANA (from vault), may have ANA fee
         if (anaChange > 0) {
           received = TokenAmount(amount: anaChange, currency: 'ANA');
         }
+        fee = buildFeeFromTransfers(feeTransfers);
         break;
 
       case NirvanaTransactionType.borrow:
@@ -871,6 +895,7 @@ class NirvanaClient {
         } else if (usdcChange < 0 && spent == null) {
           spent = TokenAmount(amount: usdcChange.abs(), currency: 'USDC');
         }
+        fee = buildFeeFromTransfers(feeTransfers);
         break;
     }
 
@@ -879,9 +904,9 @@ class NirvanaClient {
       type: txType,
       received: received,
       spent: spent,
+      fee: fee,
       timestamp: timestamp,
       userAddress: userAddress,
-      fee: fee,
     );
   }
 
@@ -987,6 +1012,82 @@ class NirvanaClient {
     return changes;
   }
 
+  /// Parse fee amounts from instructions
+  /// Fees can be:
+  /// - Mints to fee account (42rJYSmYHqbn5mk992xAoKZnWEiuMzr6u6ydj9m8fAjP) for buy transactions
+  /// - Transfers to fee account for other transactions
+  Map<String, double> _parseFeeTransfers(List instructions, List innerInstructions) {
+    const String feeAccount = '42rJYSmYHqbn5mk992xAoKZnWEiuMzr6u6ydj9m8fAjP';
+    final fees = <String, double>{};
+
+    void processInstruction(Map<String, dynamic> instruction) {
+      if (instruction['program'] != 'spl-token') return;
+
+      final parsed = instruction['parsed'];
+      if (parsed == null) return;
+
+      final type = parsed['type'] as String?;
+      final info = parsed['info'] as Map<String, dynamic>?;
+      if (info == null) return;
+
+      // Track mints to fee account (fee on buy)
+      if (type == 'mintTo') {
+        final account = info['account'] as String?;
+        final mint = info['mint'] as String?;
+        final amount = info['amount'] as String?;
+
+        // Check if mint destination is fee account
+        if (account == feeAccount && mint != null && amount != null) {
+          final uiAmount = int.parse(amount) / 1000000.0;
+          final currency = _mintToCurrency(mint);
+          fees[currency] = (fees[currency] ?? 0.0) + uiAmount;
+        }
+      }
+
+      // Track transfers to fee account (fee on sell/other)
+      if (type == 'transfer' || type == 'transferChecked') {
+        final destination = info['destination'] as String?;
+        final mint = info['mint'] as String?;
+
+        // Only track transfers to the fee account
+        if (destination != feeAccount) return;
+
+        double? uiAmount;
+        if (type == 'transferChecked') {
+          final tokenAmount = info['tokenAmount'] as Map<String, dynamic>?;
+          uiAmount = tokenAmount?['uiAmount'] as double?;
+        } else {
+          final amount = info['amount'] as String?;
+          if (amount != null) {
+            uiAmount = int.parse(amount) / 1000000.0;
+          }
+        }
+
+        if (mint != null && uiAmount != null) {
+          final currency = _mintToCurrency(mint);
+          fees[currency] = (fees[currency] ?? 0.0) + uiAmount;
+        }
+      }
+    }
+
+    for (final instruction in instructions) {
+      if (instruction is Map<String, dynamic>) {
+        processInstruction(instruction);
+      }
+    }
+
+    for (final inner in innerInstructions) {
+      final innerList = inner['instructions'] as List? ?? [];
+      for (final instruction in innerList) {
+        if (instruction is Map<String, dynamic>) {
+          processInstruction(instruction);
+        }
+      }
+    }
+
+    return fees;
+  }
+
   String _mintToCurrency(String mint) {
     if (mint == _anaMint) return 'ANA';
     if (mint == _nirvMint) return 'NIRV';
@@ -1057,12 +1158,14 @@ class NirvanaClient {
     }
   }
   
-  /// Sell ANA tokens
+  /// Sell ANA tokens for USDC or NIRV
+  /// Set useNirv=true to receive NIRV instead of USDC
   Future<TransactionResult> sellAna({
     required String userPubkey,
     required Ed25519HDKeyPair keypair,
     required double anaAmount,
-    double? minUsdcAmount,
+    double? minOutputAmount,
+    bool useNirv = false,
   }) async {
     try {
       // Resolve user accounts
@@ -1072,26 +1175,30 @@ class NirvanaClient {
       if (accounts.anaAccount == null) {
         throw Exception('User does not have ANA token account');
       }
-      if (accounts.usdcAccount == null) {
-        throw Exception('User does not have USDC token account');
-      }
-      if (accounts.nirvAccount == null) {
+      if (useNirv && accounts.nirvAccount == null) {
         throw Exception('User does not have NIRV token account');
+      }
+      if (!useNirv && accounts.usdcAccount == null) {
+        throw Exception('User does not have USDC token account');
       }
 
       // Convert amount to lamports (6 decimals)
       final anaLamports = (anaAmount * 1000000).toInt();
-      final minUsdcLamports = minUsdcAmount != null
-          ? (minUsdcAmount * 1000000).toInt()
+      final minOutputLamports = minOutputAmount != null
+          ? (minOutputAmount * 1000000).toInt()
           : 0;
 
-      // Build sell instruction (sell2 - sells ANA for USDC)
+      // Get destination account (NIRV or USDC)
+      final destinationAccount = useNirv ? accounts.nirvAccount! : accounts.usdcAccount!;
+
+      // Build sell instruction (sell2 - sells ANA for USDC or NIRV)
       final instruction = _transactionBuilder.buildSellInstruction(
         userPubkey: userPubkey,
         userAnaAccount: accounts.anaAccount!,
-        userUsdcAccount: accounts.usdcAccount!,
+        userDestinationAccount: destinationAccount,
         anaLamports: anaLamports,
-        minUsdcLamports: minUsdcLamports,
+        minOutputLamports: minOutputLamports,
+        useNirv: useNirv,
       );
 
       // Create and send transaction

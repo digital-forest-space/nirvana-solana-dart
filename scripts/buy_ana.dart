@@ -1,41 +1,42 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:nirvana_solana/nirvana_solana.dart';
-import 'package:nirvana_solana/src/accounts/account_resolver.dart';
 import 'package:solana/solana.dart';
-import 'package:solana/encoder.dart';
 
 /// Execute a buy ANA transaction
 ///
-/// Usage: dart scripts/buy_ana.dart <keypair_path> <amount> [--usdc|--nirv] [--rpc <url>]
+/// Usage: dart scripts/buy_ana.dart <keypair_path> <amount> [--nirv|--usdc] [--rpc <url>] [--verbose]
 ///
 /// Examples:
 ///   dart scripts/buy_ana.dart ~/.config/solana/id.json 10 --nirv
-///   dart scripts/buy_ana.dart ~/.config/solana/id.json 5 --usdc --rpc https://my-rpc.com
+///   dart scripts/buy_ana.dart ~/.config/solana/id.json 10 --usdc --verbose
 ///
 /// Environment:
 ///   SOLANA_RPC_URL - RPC endpoint (default: https://api.mainnet-beta.solana.com)
 
 void main(List<String> args) async {
   if (args.length < 2) {
-    print('Usage: dart scripts/buy_ana.dart <keypair_path> <amount> [--usdc|--nirv] [--rpc <url>]');
+    print('Usage: dart scripts/buy_ana.dart <keypair_path> <amount> [--nirv|--usdc] [--rpc <url>] [--verbose]');
     print('');
     print('Options:');
     print('  --nirv       Pay with NIRV (default)');
     print('  --usdc       Pay with USDC');
     print('  --rpc <url>  Custom RPC endpoint');
+    print('  --verbose    Show detailed output before JSON result');
     print('');
     print('Environment:');
     print('  SOLANA_RPC_URL  RPC endpoint (overridden by --rpc)');
-    print('');
-    print('Examples:');
-    print('  dart scripts/buy_ana.dart ~/.config/solana/id.json 10 --nirv');
-    print('  dart scripts/buy_ana.dart ~/.config/solana/id.json 5 --rpc https://my-rpc.com');
     exit(1);
   }
 
   final keypairPath = args[0];
   final amount = double.tryParse(args[1]);
-  final useNirv = !args.any((a) => a.toLowerCase() == '--usdc');
+
+  // Parse flags - default to NIRV if neither specified
+  final useUsdc = args.any((a) => a.toLowerCase() == '--usdc');
+  final useNirv = !useUsdc;
+  final verbose = args.any((a) => a.toLowerCase() == '--verbose');
+  final paymentCurrency = useNirv ? 'NIRV' : 'USDC';
 
   // Parse RPC URL from --rpc flag or environment
   String rpcUrl = Platform.environment['SOLANA_RPC_URL'] ?? 'https://api.mainnet-beta.solana.com';
@@ -45,113 +46,110 @@ void main(List<String> args) async {
   }
 
   if (amount == null || amount <= 0) {
-    print('Error: Invalid amount: ${args[1]}');
+    print(jsonEncode({'success': false, 'error': 'Invalid amount: ${args[1]}'}));
     exit(1);
   }
 
   // Load keypair
   final keypairFile = File(keypairPath);
   if (!keypairFile.existsSync()) {
-    print('Error: Keypair file not found: $keypairPath');
+    print(jsonEncode({'success': false, 'error': 'Keypair file not found: $keypairPath'}));
     exit(1);
   }
 
-  print('Loading keypair from $keypairPath...');
+  if (verbose) print('Loading keypair from $keypairPath...');
   final keypairJson = keypairFile.readAsStringSync();
   final keypairBytes = (RegExp(r'\d+').allMatches(keypairJson).map((m) => int.parse(m.group(0)!)).toList());
   final keypair = await Ed25519HDKeyPair.fromPrivateKeyBytes(
     privateKey: keypairBytes.sublist(0, 32),
   );
   final userPubkey = keypair.publicKey.toBase58();
-  print('Wallet: $userPubkey');
+  if (verbose) print('Wallet: $userPubkey');
 
-  // Create client using rpcUrl from args/env (parsed above)
-  print('RPC: $rpcUrl');
+  // Create client
+  if (verbose) print('RPC: $rpcUrl');
   final solanaClient = SolanaClient(rpcUrl: Uri.parse(rpcUrl), websocketUrl: Uri.parse(rpcUrl.replaceFirst('https', 'wss')));
   final rpcClient = DefaultSolanaRpcClient(solanaClient, rpcUrl: Uri.parse(rpcUrl));
   final client = NirvanaClient(rpcClient: rpcClient);
 
   // Show current prices
-  print('\nFetching current floor price...');
+  if (verbose) print('\nFetching current floor price...');
   final floorPrice = await client.fetchFloorPrice();
-  print('  Floor price: \$${floorPrice.toStringAsFixed(6)}');
+  if (verbose) print('  Floor price: \$${floorPrice.toStringAsFixed(6)}');
 
-  // Estimate ANA to receive (buy price is above floor)
-  final paymentCurrency = useNirv ? 'NIRV' : 'USDC';
-  final estimatedAna = amount / floorPrice;
-  print('\nTransaction:');
-  print('  Paying: $amount $paymentCurrency');
-  print('  Estimated ANA: ${estimatedAna.toStringAsFixed(6)} ANA');
+  // Estimate ANA to receive
+  final estimatedAna = amount / floorPrice * 0.97;
+  if (verbose) {
+    print('\nTransaction:');
+    print('  Spending: $amount $paymentCurrency');
+    print('  Estimated ANA: ${estimatedAna.toStringAsFixed(6)} ANA (after ~3% fee)');
+    print('\nExecuting buy transaction...');
+  }
 
   // Execute buy
-  print('\nExecuting buy transaction...');
+  final result = await client.buyAna(
+    userPubkey: userPubkey,
+    keypair: keypair,
+    amount: amount,
+    useNirv: useNirv,
+  );
 
-  try {
-    // Resolve user token accounts
-    final accountResolver = NirvanaAccountResolver(rpcClient);
-    final accounts = await accountResolver.resolveUserAccounts(userPubkey);
-
-    // Validate accounts
-    final paymentAccount = useNirv ? accounts.nirvAccount : accounts.usdcAccount;
-    if (paymentAccount == null) {
-      print('\n❌ Buy failed!');
-      print('  Error: User does not have ${useNirv ? "NIRV" : "USDC"} token account');
-      exit(1);
-    }
-    if (accounts.anaAccount == null) {
-      print('\n❌ Buy failed!');
-      print('  Error: User does not have ANA token account');
-      exit(1);
-    }
-    if (accounts.nirvAccount == null) {
-      print('\n❌ Buy failed!');
-      print('  Error: User does not have NIRV token account');
-      exit(1);
+  if (result.success) {
+    if (verbose) {
+      print('\n✅ Buy successful!');
+      print('  Signature: ${result.signature}');
+      print('  Explorer: https://solscan.io/tx/${result.signature}');
+      print('\nParsing transaction...');
     }
 
-    // Build buy instruction
-    final transactionBuilder = NirvanaTransactionBuilder();
-    final amountLamports = (amount * 1000000).toInt();
-    final instruction = transactionBuilder.buildBuyExact2Instruction(
-      userPubkey: userPubkey,
-      userPaymentAccount: paymentAccount,
-      userAnaAccount: accounts.anaAccount!,
-      userNirvAccount: accounts.nirvAccount!,
-      amountLamports: amountLamports,
-      useNirv: useNirv,
-    );
-
-    // Create message and send transaction using SolanaClient directly
-    final message = Message(instructions: [instruction]);
-    final signature = await solanaClient.sendAndConfirmTransaction(
-      message: message,
-      signers: [keypair],
-      commitment: Commitment.confirmed,
-    );
-
-    print('\n✅ Buy successful!');
-    print('  Signature: $signature');
-    print('  Explorer: https://solscan.io/tx/$signature');
-
-    // Parse the transaction to show actual amounts (with retry)
-    print('\nParsing transaction...');
+    // Parse the transaction
     try {
-      final tx = await client.parseTransaction(signature);
-      print('  Type: ${tx.type.name.toUpperCase()}');
-      if (tx.spent != null) {
-        print('  Spent: ${tx.spent!.amount.toStringAsFixed(6)} ${tx.spent!.currency}');
+      final tx = await client.parseTransaction(result.signature);
+      if (verbose) {
+        print('  Type: ${tx.type.name.toUpperCase()}');
+        if (tx.spent != null) print('  Spent: ${tx.spent!.amount.toStringAsFixed(6)} ${tx.spent!.currency}');
+        if (tx.received != null) print('  Received: ${tx.received!.amount.toStringAsFixed(6)} ${tx.received!.currency}');
+        if (tx.fee != null) print('  Fee: ${tx.fee!.amount.toStringAsFixed(6)} ${tx.fee!.currency}');
+        if (tx.pricePerAna != null) print('  Price: \$${tx.pricePerAna!.toStringAsFixed(6)} per ANA');
+        print('');
       }
-      if (tx.received != null) {
-        print('  Received: ${tx.received!.amount.toStringAsFixed(6)} ${tx.received!.currency}');
-      }
-      if (tx.pricePerAna != null) {
-        print('  Price: \$${tx.pricePerAna!.toStringAsFixed(6)} per ANA');
-      }
+
+      // Output JSON result
+      print(jsonEncode({
+        'success': true,
+        'signature': result.signature,
+        'type': tx.type.name,
+        'spent': tx.spent != null ? {
+          'amount': tx.spent!.amount,
+          'currency': tx.spent!.currency,
+        } : null,
+        'received': tx.received != null ? {
+          'amount': tx.received!.amount,
+          'currency': tx.received!.currency,
+          if (tx.pricePerAna != null) 'price': tx.pricePerAna,
+        } : null,
+        'fee': tx.fee != null ? {
+          'amount': tx.fee!.amount,
+          'currency': tx.fee!.currency,
+        } : null,
+        'timestamp': tx.timestamp.toIso8601String(),
+        'userAddress': tx.userAddress,
+        'explorer': 'https://solscan.io/tx/${result.signature}',
+      }));
     } catch (e) {
-      print('  (Could not parse transaction: $e)');
+      print(jsonEncode({
+        'success': true,
+        'signature': result.signature,
+        'parseError': e.toString(),
+        'explorer': 'https://solscan.io/tx/${result.signature}',
+      }));
     }
-  } catch (e) {
-    print('\n❌ Buy failed!');
-    print('  Error: $e');
+  } else {
+    if (verbose) {
+      print('\n❌ Buy failed!');
+      print('  Error: ${result.error}');
+    }
+    print(jsonEncode({'success': false, 'error': result.error}));
+    exit(1);
   }
 }

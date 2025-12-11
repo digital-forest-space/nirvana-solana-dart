@@ -64,14 +64,16 @@ class NirvanaTransactionBuilder {
     );
   }
   
-  /// Build sell2 instruction (sells ANA for USDC)
+  /// Build sell2 instruction (sells ANA for USDC or NIRV)
   /// Based on Chrome injection analysis of actual sell transactions
+  /// Set useNirv=true to receive NIRV instead of USDC
   Instruction buildSellInstruction({
     required String userPubkey,
     required String userAnaAccount,
-    required String userUsdcAccount,
+    required String userDestinationAccount, // USDC account or NIRV account depending on useNirv
     required int anaLamports,
-    int minUsdcLamports = 0,
+    int minOutputLamports = 0,
+    bool useNirv = false,
   }) {
     // sell2 discriminator (confirmed from Chrome injection analysis)
     final discriminator = [47, 191, 120, 1, 28, 35, 253, 79];
@@ -79,22 +81,23 @@ class NirvanaTransactionBuilder {
     // Build instruction data
     final anaBytes = Uint8List(8);
     anaBytes.buffer.asByteData().setUint64(0, anaLamports, Endian.little);
-    final minUsdcBytes = Uint8List(8);
-    minUsdcBytes.buffer.asByteData().setUint64(0, minUsdcLamports, Endian.little);
+    final minOutputBytes = Uint8List(8);
+    minOutputBytes.buffer.asByteData().setUint64(0, minOutputLamports, Endian.little);
 
     final instructionData = [
       ...discriminator,
       ...anaBytes,
-      ...minUsdcBytes,
+      ...minOutputBytes,
     ];
 
     // Build accounts in exact order from Chrome injection analysis
+    // Account 4 is the destination - either user's USDC or NIRV account
     final accounts = [
       AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userPubkey), isSigner: true, isWriteable: true),           // 0: user/signer
       AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.tenantAccount), isSigner: false, isWriteable: true), // 1: tenant
       AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.priceCurve), isSigner: false, isWriteable: true),    // 2: price curve (must be writable!)
       AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.anaMint), isSigner: false, isWriteable: true),       // 3: ANA mint
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userUsdcAccount), isSigner: false, isWriteable: true),       // 4: user USDC account (destination)
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userDestinationAccount), isSigner: false, isWriteable: true), // 4: user destination account (USDC or NIRV)
       AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.escrowRevNirv), isSigner: false, isWriteable: true), // 5: escrow ANA (same as escrowRevNirv)
       AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.tenantUsdcVault), isSigner: false, isWriteable: true), // 6: tenant USDC vault (source)
       AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.tenantAnaVault), isSigner: false, isWriteable: true),  // 7: tenant ANA/NIRV vault

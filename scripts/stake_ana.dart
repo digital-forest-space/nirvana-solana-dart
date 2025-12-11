@@ -1,37 +1,37 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:nirvana_solana/nirvana_solana.dart';
 import 'package:solana/solana.dart';
 
-/// Stake ANA tokens
+/// Execute a stake ANA transaction
 ///
-/// Usage: dart scripts/stake_ana.dart <keypair_path> <ana_amount> [--rpc <url>]
+/// Usage: dart scripts/stake_ana.dart <keypair_path> <ana_amount> [--rpc <url>] [--verbose]
 ///
 /// Examples:
-///   dart scripts/stake_ana.dart ~/.config/solana/id.json 1.0
-///   dart scripts/stake_ana.dart ~/.config/solana/id.json 1.0 --rpc https://my-rpc.com
+///   dart scripts/stake_ana.dart ~/.config/solana/id.json 1.5
+///   dart scripts/stake_ana.dart ~/.config/solana/id.json 1.5 --verbose
 ///
 /// Environment:
 ///   SOLANA_RPC_URL - RPC endpoint (default: https://api.mainnet-beta.solana.com)
 
 void main(List<String> args) async {
   if (args.length < 2) {
-    print('Usage: dart scripts/stake_ana.dart <keypair_path> <ana_amount> [--rpc <url>]');
-    print('');
-    print('Stake ANA tokens to earn prANA rewards.');
+    print('Usage: dart scripts/stake_ana.dart <keypair_path> <ana_amount> [--rpc <url>] [--verbose]');
     print('');
     print('Options:');
     print('  --rpc <url>  Custom RPC endpoint');
+    print('  --verbose    Show detailed output before JSON result');
     print('');
     print('Environment:');
     print('  SOLANA_RPC_URL  RPC endpoint (overridden by --rpc)');
-    print('');
-    print('Examples:');
-    print('  dart scripts/stake_ana.dart ~/.config/solana/id.json 1.0');
     exit(1);
   }
 
   final keypairPath = args[0];
   final anaAmount = double.tryParse(args[1]);
+
+  // Parse flags
+  final verbose = args.any((a) => a.toLowerCase() == '--verbose');
 
   // Parse RPC URL from --rpc flag or environment
   String rpcUrl = Platform.environment['SOLANA_RPC_URL'] ?? 'https://api.mainnet-beta.solana.com';
@@ -41,45 +41,43 @@ void main(List<String> args) async {
   }
 
   if (anaAmount == null || anaAmount <= 0) {
-    print('Error: Invalid amount: ${args[1]}');
+    print(jsonEncode({'success': false, 'error': 'Invalid amount: ${args[1]}'}));
     exit(1);
   }
 
   // Load keypair
   final keypairFile = File(keypairPath);
   if (!keypairFile.existsSync()) {
-    print('Error: Keypair file not found: $keypairPath');
+    print(jsonEncode({'success': false, 'error': 'Keypair file not found: $keypairPath'}));
     exit(1);
   }
 
-  print('Loading keypair from $keypairPath...');
+  if (verbose) print('Loading keypair from $keypairPath...');
   final keypairJson = keypairFile.readAsStringSync();
   final keypairBytes = (RegExp(r'\d+').allMatches(keypairJson).map((m) => int.parse(m.group(0)!)).toList());
   final keypair = await Ed25519HDKeyPair.fromPrivateKeyBytes(
     privateKey: keypairBytes.sublist(0, 32),
   );
   final userPubkey = keypair.publicKey.toBase58();
-  print('Wallet: $userPubkey');
+  if (verbose) print('Wallet: $userPubkey');
 
-  // Create client using rpcUrl from args/env (parsed above)
-  print('RPC: $rpcUrl');
+  // Create client
+  if (verbose) print('RPC: $rpcUrl');
   final solanaClient = SolanaClient(rpcUrl: Uri.parse(rpcUrl), websocketUrl: Uri.parse(rpcUrl.replaceFirst('https', 'wss')));
   final rpcClient = DefaultSolanaRpcClient(solanaClient, rpcUrl: Uri.parse(rpcUrl));
   final client = NirvanaClient(rpcClient: rpcClient);
 
   // Show current prices
-  print('\nFetching current floor price...');
+  if (verbose) print('\nFetching current floor price...');
   final floorPrice = await client.fetchFloorPrice();
-  print('  Floor price: \$${floorPrice.toStringAsFixed(6)}');
-
-  // Show transaction details
-  final stakeValue = anaAmount * floorPrice;
-  print('\nTransaction:');
-  print('  Staking: $anaAmount ANA');
-  print('  Value: ~\$${stakeValue.toStringAsFixed(2)} (at floor price)');
+  if (verbose) {
+    print('  Floor price: \$${floorPrice.toStringAsFixed(6)}');
+    print('\nTransaction:');
+    print('  Staking: $anaAmount ANA');
+    print('\nExecuting stake transaction...');
+  }
 
   // Execute stake
-  print('\nExecuting stake transaction...');
   final result = await client.stakeAna(
     userPubkey: userPubkey,
     keypair: keypair,
@@ -87,23 +85,46 @@ void main(List<String> args) async {
   );
 
   if (result.success) {
-    print('\n✅ Stake successful!');
-    print('  Signature: ${result.signature}');
-    print('  Explorer: https://solscan.io/tx/${result.signature}');
+    if (verbose) {
+      print('\n✅ Stake successful!');
+      print('  Signature: ${result.signature}');
+      print('  Explorer: https://solscan.io/tx/${result.signature}');
+      print('\nParsing transaction...');
+    }
 
-    // Parse the transaction to show actual amounts (with retry)
-    print('\nParsing transaction...');
+    // Parse the transaction
     try {
       final tx = await client.parseTransaction(result.signature);
-      print('  Type: ${tx.type.name.toUpperCase()}');
-      if (tx.spent != null) {
-        print('  Staked: ${tx.spent!.amount.toStringAsFixed(6)} ${tx.spent!.currency}');
+      if (verbose) {
+        print('  Type: ${tx.type.name.toUpperCase()}');
+        if (tx.spent != null) print('  Staked: ${tx.spent!.amount.toStringAsFixed(6)} ${tx.spent!.currency}');
+        print('');
       }
+
+      // Output JSON result
+      print(jsonEncode({
+        'success': true,
+        'signature': result.signature,
+        'type': tx.type.name,
+        'staked': tx.spent != null ? {'amount': tx.spent!.amount, 'currency': tx.spent!.currency} : null,
+        'timestamp': tx.timestamp.toIso8601String(),
+        'userAddress': tx.userAddress,
+        'explorer': 'https://solscan.io/tx/${result.signature}',
+      }));
     } catch (e) {
-      print('  (Could not parse transaction: $e)');
+      print(jsonEncode({
+        'success': true,
+        'signature': result.signature,
+        'parseError': e.toString(),
+        'explorer': 'https://solscan.io/tx/${result.signature}',
+      }));
     }
   } else {
-    print('\n❌ Stake failed!');
-    print('  Error: ${result.error}');
+    if (verbose) {
+      print('\n❌ Stake failed!');
+      print('  Error: ${result.error}');
+    }
+    print(jsonEncode({'success': false, 'error': result.error}));
+    exit(1);
   }
 }

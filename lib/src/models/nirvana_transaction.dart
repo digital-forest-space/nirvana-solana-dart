@@ -36,18 +36,18 @@ class NirvanaTransaction extends Equatable {
   final NirvanaTransactionType type;
   final TokenAmount? received;
   final TokenAmount? spent;
+  final TokenAmount? fee; // Fee is a separate TokenAmount since it can be a different currency than spent
   final DateTime timestamp;
   final String userAddress;
-  final double? fee;
 
   const NirvanaTransaction({
     required this.signature,
     required this.type,
     this.received,
     this.spent,
+    this.fee,
     required this.timestamp,
     required this.userAddress,
-    this.fee,
   });
 
   /// Price per ANA (if applicable)
@@ -66,7 +66,7 @@ class NirvanaTransaction extends Equatable {
   }
 
   @override
-  List<Object?> get props => [signature, type, received, spent, timestamp, userAddress, fee];
+  List<Object?> get props => [signature, type, received, spent, fee, timestamp, userAddress];
 
   @override
   String toString() {
@@ -74,6 +74,7 @@ class NirvanaTransaction extends Equatable {
     buffer.write('type: ${type.name}, ');
     if (spent != null) buffer.write('spent: $spent, ');
     if (received != null) buffer.write('received: $received, ');
+    if (fee != null) buffer.write('fee: $fee, ');
     buffer.write('timestamp: $timestamp, ');
     buffer.write('signature: $signature');
     buffer.write(')');
