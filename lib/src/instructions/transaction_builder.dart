@@ -259,33 +259,34 @@ class NirvanaTransactionBuilder {
     );
   }
 
-  /// Build repay instruction (repays NIRV debt by burning ANA)
+  /// Build repay instruction (repays NIRV debt by burning NIRV)
   /// Based on Chrome injection analysis of actual repay transactions
   Instruction buildRepayInstruction({
     required String userPubkey,
     required String personalAccount,
-    required String userAnaAccount,
-    required int anaLamports,
+    required String userNirvAccount,
+    required int nirvLamports,
   }) {
     // repay discriminator (confirmed from Chrome injection analysis)
     final discriminator = [28, 158, 130, 191, 125, 127, 195, 94];
 
     // Build instruction data
-    final anaBytes = Uint8List(8);
-    anaBytes.buffer.asByteData().setUint64(0, anaLamports, Endian.little);
+    final nirvBytes = Uint8List(8);
+    nirvBytes.buffer.asByteData().setUint64(0, nirvLamports, Endian.little);
 
     final instructionData = [
       ...discriminator,
-      ...anaBytes,
+      ...nirvBytes,
     ];
 
     // Build accounts in exact order from Chrome injection analysis (6 accounts)
+    // Repay burns NIRV to reduce debt
     final accounts = [
       AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userPubkey), isSigner: true, isWriteable: true),           // 0: user/signer
       AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.tenantAccount), isSigner: false, isWriteable: true), // 1: tenant
       AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(personalAccount), isSigner: false, isWriteable: true),       // 2: personal account
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userAnaAccount), isSigner: false, isWriteable: true),        // 3: user ANA account (burns ANA)
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.anaMint), isSigner: false, isWriteable: true),       // 4: ANA mint
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userNirvAccount), isSigner: false, isWriteable: true),       // 3: user NIRV account (burns NIRV)
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.nirvMint), isSigner: false, isWriteable: true),      // 4: NIRV mint
       AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(tokenProgram), isSigner: false, isWriteable: false),         // 5: token program
     ];
 

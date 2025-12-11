@@ -3,22 +3,22 @@ import 'dart:io';
 import 'package:nirvana_solana/nirvana_solana.dart';
 import 'package:solana/solana.dart';
 
-/// Execute a repay transaction (burn ANA to pay off NIRV debt)
+/// Execute a repay transaction (burn NIRV to pay off NIRV debt)
 ///
-/// Usage: dart scripts/repay_ana.dart <keypair_path> <ana_amount> [--rpc <url>] [--verbose]
+/// Usage: dart scripts/repay_nirv.dart <keypair_path> <nirv_amount> [--rpc <url>] [--verbose]
 ///
 /// Examples:
-///   dart scripts/repay_ana.dart ~/.config/solana/id.json 1.5
-///   dart scripts/repay_ana.dart ~/.config/solana/id.json 1.5 --verbose
+///   dart scripts/repay_nirv.dart ~/.config/solana/id.json 0.5
+///   dart scripts/repay_nirv.dart ~/.config/solana/id.json 0.5 --verbose
 ///
 /// Environment:
 ///   SOLANA_RPC_URL - RPC endpoint (default: https://api.mainnet-beta.solana.com)
 ///
-/// Note: Burns ANA at floor price to repay borrowed NIRV debt
+/// Note: Burns NIRV to repay borrowed NIRV debt
 
 void main(List<String> args) async {
   if (args.length < 2) {
-    print('Usage: dart scripts/repay_ana.dart <keypair_path> <ana_amount> [--rpc <url>] [--verbose]');
+    print('Usage: dart scripts/repay_nirv.dart <keypair_path> <nirv_amount> [--rpc <url>] [--verbose]');
     print('');
     print('Options:');
     print('  --rpc <url>  Custom RPC endpoint');
@@ -27,12 +27,12 @@ void main(List<String> args) async {
     print('Environment:');
     print('  SOLANA_RPC_URL  RPC endpoint (overridden by --rpc)');
     print('');
-    print('Note: Burns ANA at floor price to repay borrowed NIRV debt.');
+    print('Note: Burns NIRV to repay borrowed NIRV debt.');
     exit(1);
   }
 
   final keypairPath = args[0];
-  final anaAmount = double.tryParse(args[1]);
+  final nirvAmount = double.tryParse(args[1]);
 
   // Parse flags
   final verbose = args.any((a) => a.toLowerCase() == '--verbose');
@@ -44,7 +44,7 @@ void main(List<String> args) async {
     rpcUrl = args[rpcIndex + 1];
   }
 
-  if (anaAmount == null || anaAmount <= 0) {
+  if (nirvAmount == null || nirvAmount <= 0) {
     print(jsonEncode({'success': false, 'error': 'Invalid amount: ${args[1]}'}));
     exit(1);
   }
@@ -71,15 +71,9 @@ void main(List<String> args) async {
   final rpcClient = DefaultSolanaRpcClient(solanaClient, rpcUrl: Uri.parse(rpcUrl));
   final client = NirvanaClient(rpcClient: rpcClient);
 
-  // Show current prices
-  if (verbose) print('\nFetching current floor price...');
-  final floorPrice = await client.fetchFloorPrice();
-  final nirvRepaid = anaAmount * floorPrice;
   if (verbose) {
-    print('  Floor price: \$${floorPrice.toStringAsFixed(6)}');
     print('\nTransaction:');
-    print('  Burning: $anaAmount ANA');
-    print('  Repaying: ~${nirvRepaid.toStringAsFixed(6)} NIRV debt');
+    print('  Repaying: $nirvAmount NIRV debt');
     print('\nExecuting repay transaction...');
   }
 
@@ -87,7 +81,7 @@ void main(List<String> args) async {
   final result = await client.repayNirv(
     userPubkey: userPubkey,
     keypair: keypair,
-    anaAmount: anaAmount,
+    nirvAmount: nirvAmount,
   );
 
   if (result.success) {

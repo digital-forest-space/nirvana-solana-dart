@@ -809,7 +809,7 @@ class NirvanaClient {
     // Parse inner instructions for burn/mint operations (fallback if balance changes are 0)
     final innerInstructions = meta['innerInstructions'] as List? ?? [];
     final burnMintChanges = _parseBurnMintOperations(instructions, innerInstructions);
-    final feeTransfers = _parseFeeTransfers(instructions, innerInstructions, accountToMint);
+    final feeTransfers = _parseFeeTransfers(instructions, innerInstructions, accountToMint, userAddress);
 
     if (anaChange == 0.0) {
       anaChange = burnMintChanges['ANA'] ?? 0.0;
@@ -878,16 +878,17 @@ class NirvanaClient {
         break;
 
       case NirvanaTransactionType.borrow:
-        // User receives NIRV (minted)
+        // User receives NIRV (minted), fee is also minted in NIRV to escrow
         if (nirvChange > 0) {
           received = TokenAmount(amount: nirvChange, currency: 'NIRV');
         }
+        fee = buildFeeFromTransfers(feeTransfers);
         break;
 
       case NirvanaTransactionType.repay:
-        // User sends ANA (burned)
-        if (anaChange < 0) {
-          sent = TokenAmount(amount: anaChange.abs(), currency: 'ANA');
+        // User sends NIRV (burned to repay debt)
+        if (nirvChange < 0) {
+          sent = TokenAmount(amount: nirvChange.abs(), currency: 'NIRV');
         }
         break;
 
@@ -1045,16 +1046,23 @@ class NirvanaClient {
   /// Parse fee amounts from instructions
   /// Fees can be:
   /// - Mints to fee account (42rJYSmYHqbn5mk992xAoKZnWEiuMzr6u6ydj9m8fAjP) for buy transactions
+  /// - Mints to treasury (BcAoCEdkzV2J21gAjCCEokBw5iMnAe96SbYo9F6QmKWV) for borrow transactions
   /// - Transfers to fee account for other transactions
   ///
   /// [accountToMint] maps token account addresses to their mint addresses
   /// (used to resolve mint for simple transfer instructions that don't include it)
+  /// [userAddress] is the user's wallet address to exclude user mints from fee detection
   Map<String, double> _parseFeeTransfers(
     List instructions,
     List innerInstructions,
     Map<String, String> accountToMint,
+    String userAddress,
   ) {
-    const String feeAccount = '42rJYSmYHqbn5mk992xAoKZnWEiuMzr6u6ydj9m8fAjP';
+    // Protocol fee accounts - fees go to one of these depending on operation type
+    const feeAccounts = {
+      '42rJYSmYHqbn5mk992xAoKZnWEiuMzr6u6ydj9m8fAjP', // escrowRevNirv (buy/sell fees)
+      'v2EeX2VjgsMbwokj6UDmAm691oePzrcvKpK5DT7LwbQ',  // escrowNirvAccount (borrow fees)
+    };
     final fees = <String, double>{};
 
     void processInstruction(Map<String, dynamic> instruction) {
@@ -1067,28 +1075,28 @@ class NirvanaClient {
       final info = parsed['info'] as Map<String, dynamic>?;
       if (info == null) return;
 
-      // Track mints to fee account (fee on buy)
+      // Track mints to fee accounts (fee on buy/borrow)
       if (type == 'mintTo') {
         final account = info['account'] as String?;
         final mint = info['mint'] as String?;
         final amount = info['amount'] as String?;
 
-        // Check if mint destination is fee account
-        if (account == feeAccount && mint != null && amount != null) {
+        // Check if mint destination is a fee account
+        if (feeAccounts.contains(account) && mint != null && amount != null) {
           final uiAmount = int.parse(amount) / 1000000.0;
           final currency = _mintToCurrency(mint);
           fees[currency] = (fees[currency] ?? 0.0) + uiAmount;
         }
       }
 
-      // Track transfers to fee account (fee on sell/other)
+      // Track transfers to fee accounts (fee on sell/other)
       if (type == 'transfer' || type == 'transferChecked') {
         final destination = info['destination'] as String?;
         final source = info['source'] as String?;
         String? mint = info['mint'] as String?;
 
-        // Only track transfers to the fee account
-        if (destination != feeAccount) return;
+        // Only track transfers to fee accounts
+        if (!feeAccounts.contains(destination)) return;
 
         // For simple 'transfer' instructions, mint is not included - look it up from source account
         if (mint == null && source != null) {
@@ -1442,12 +1450,12 @@ class NirvanaClient {
     throw UnimplementedError('claimPrana not yet implemented');
   }
   
-  /// Repay NIRV debt by burning ANA tokens
-  /// The ANA is burned to reduce outstanding NIRV debt on the personal account
+  /// Repay NIRV debt by burning NIRV tokens
+  /// The NIRV is burned to reduce outstanding NIRV debt on the personal account
   Future<TransactionResult> repayNirv({
     required String userPubkey,
     required Ed25519HDKeyPair keypair,
-    required double anaAmount,
+    required double nirvAmount,
   }) async {
     try {
       // Find personal account (required for repay)
@@ -1458,19 +1466,19 @@ class NirvanaClient {
 
       // Resolve user accounts
       final accounts = await _accountResolver.resolveUserAccounts(userPubkey);
-      if (accounts.anaAccount == null) {
-        throw Exception('User does not have ANA token account');
+      if (accounts.nirvAccount == null) {
+        throw Exception('User does not have NIRV token account');
       }
 
-      // Convert to lamports (ANA has 6 decimals)
-      final anaLamports = (anaAmount * 1000000).toInt();
+      // Convert to lamports (NIRV has 6 decimals)
+      final nirvLamports = (nirvAmount * 1000000).toInt();
 
-      // Build repay instruction
+      // Build repay instruction - burns NIRV to reduce debt
       final instruction = _transactionBuilder.buildRepayInstruction(
         userPubkey: userPubkey,
         personalAccount: personalAccount,
-        userAnaAccount: accounts.anaAccount!,
-        anaLamports: anaLamports,
+        userNirvAccount: accounts.nirvAccount!,
+        nirvLamports: nirvLamports,
       );
 
       // Create and send transaction
@@ -1482,7 +1490,7 @@ class NirvanaClient {
 
       return TransactionResult.success(
         signature: signature,
-        logs: ['Repay NIRV transaction successful - burned $anaAmount ANA'],
+        logs: ['Repay NIRV transaction successful - burned $nirvAmount NIRV'],
       );
     } catch (e) {
       return TransactionResult.failure(
