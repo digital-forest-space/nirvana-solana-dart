@@ -963,7 +963,7 @@ class NirvanaClient {
         logs: ['Unstake ANA transaction successful'],
       );
     } catch (e) {
-      return TransactionResult.failure(error: e.toString());
+      return TransactionResult.failure(signature: '', error: e.toString());
     }
   }
   
