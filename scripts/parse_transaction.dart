@@ -48,7 +48,7 @@ void main(List<String> args) async {
     rpcUrl: Uri.parse(rpcUrl),
     websocketUrl: Uri.parse(rpcUrl.replaceFirst('https', 'wss')),
   );
-  final rpcClient = DefaultSolanaRpcClient(solanaClient);
+  final rpcClient = DefaultSolanaRpcClient(solanaClient, rpcUrl: Uri.parse(rpcUrl));
   final client = NirvanaClient(rpcClient: rpcClient);
 
   try {

@@ -68,7 +68,7 @@ void main(List<String> args) async {
   // Create client using rpcUrl from args/env (parsed above)
   print('RPC: $rpcUrl');
   final solanaClient = SolanaClient(rpcUrl: Uri.parse(rpcUrl), websocketUrl: Uri.parse(rpcUrl.replaceFirst('https', 'wss')));
-  final rpcClient = DefaultSolanaRpcClient(solanaClient);
+  final rpcClient = DefaultSolanaRpcClient(solanaClient, rpcUrl: Uri.parse(rpcUrl));
   final client = NirvanaClient(rpcClient: rpcClient);
 
   // Show current prices
@@ -132,6 +132,24 @@ void main(List<String> args) async {
     print('\n✅ Buy successful!');
     print('  Signature: $signature');
     print('  Explorer: https://solscan.io/tx/$signature');
+
+    // Parse the transaction to show actual amounts (with retry)
+    print('\nParsing transaction...');
+    try {
+      final tx = await client.parseTransaction(signature);
+      print('  Type: ${tx.type.name.toUpperCase()}');
+      if (tx.spent != null) {
+        print('  Spent: ${tx.spent!.amount.toStringAsFixed(6)} ${tx.spent!.currency}');
+      }
+      if (tx.received != null) {
+        print('  Received: ${tx.received!.amount.toStringAsFixed(6)} ${tx.received!.currency}');
+      }
+      if (tx.pricePerAna != null) {
+        print('  Price: \$${tx.pricePerAna!.toStringAsFixed(6)} per ANA');
+      }
+    } catch (e) {
+      print('  (Could not parse transaction: $e)');
+    }
   } catch (e) {
     print('\n❌ Buy failed!');
     print('  Error: $e');

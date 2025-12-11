@@ -13,6 +13,7 @@ import '../models/nirvana_transaction.dart';
 import '../rpc/solana_rpc_client.dart';
 import '../instructions/transaction_builder.dart';
 import '../accounts/account_resolver.dart';
+import '../utils/retry.dart';
 
 /// Main client for interacting with Nirvana V2 protocol
 class NirvanaClient {
@@ -354,10 +355,10 @@ class NirvanaClient {
       final mint = preBalance['mint'] as String;
       processedIndices.add(accountIndex);
 
-      final postBalance = postTokenBalances.firstWhere(
-        (pb) => pb['accountIndex'] == accountIndex,
-        orElse: () => null,
-      );
+      final postBalance = postTokenBalances
+          .cast<Map<String, dynamic>>()
+          .where((pb) => pb['accountIndex'] == accountIndex)
+          .firstOrNull;
 
       if (postBalance == null) continue;
 
@@ -413,11 +414,8 @@ class NirvanaClient {
   }
 
   double _getChangeForMint(List<Map<String, dynamic>> changes, String mint) {
-    final match = changes.firstWhere(
-      (c) => c['mint'] == mint,
-      orElse: () => {'change': 0.0},
-    );
-    return match['change'] as double;
+    final match = changes.where((c) => c['mint'] == mint).firstOrNull;
+    return (match?['change'] as double?) ?? 0.0;
   }
 
   Future<Uint8List> _fetchPriceCurveAccountData() async {
@@ -702,8 +700,14 @@ class NirvanaClient {
 
   /// Parse a Nirvana protocol transaction to extract details
   /// Returns transaction type, amounts received/spent, and timestamp
+  /// Uses retry with exponential backoff for transient errors
   Future<NirvanaTransaction> parseTransaction(String signature) async {
-    final txData = await _rpcClient.getTransaction(signature);
+    final txData = await Retry.withBackoff(
+      operation: () => _rpcClient.getTransaction(signature),
+      maxAttempts: 5,
+      initialDelay: 2000,
+      retryIf: Retry.isRetryableError,
+    );
 
     final meta = txData['meta'] as Map<String, dynamic>?;
     if (meta == null) {

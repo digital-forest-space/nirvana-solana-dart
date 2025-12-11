@@ -20,3 +20,6 @@ export 'src/instructions/transaction_builder.dart';
 
 // Accounts (advanced users)
 export 'src/accounts/account_resolver.dart';
+
+// Utilities
+export 'src/utils/retry.dart';

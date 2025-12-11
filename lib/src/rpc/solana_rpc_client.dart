@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:solana/solana.dart';
 import 'package:solana/dto.dart';
 import 'package:solana/encoder.dart';
@@ -42,8 +43,14 @@ abstract class SolanaRpcClient {
 /// Default implementation using solana package
 class DefaultSolanaRpcClient implements SolanaRpcClient {
   final SolanaClient _client;
-  
-  DefaultSolanaRpcClient(this._client);
+  final Uri _rpcUrl;
+
+  /// Creates a DefaultSolanaRpcClient with an explicit RPC URL.
+  /// The URL is needed for raw HTTP requests (e.g., getTransaction)
+  /// since the SolanaClient doesn't expose its URL.
+  DefaultSolanaRpcClient(SolanaClient client, {Uri? rpcUrl})
+      : _client = client,
+        _rpcUrl = rpcUrl ?? Uri.parse('https://api.mainnet-beta.solana.com');
   
   @override
   Future<Map<String, dynamic>> getAccountInfo(String address) async {
@@ -124,19 +131,38 @@ class DefaultSolanaRpcClient implements SolanaRpcClient {
 
   @override
   Future<Map<String, dynamic>> getTransaction(String signature) async {
-    final tx = await _client.rpcClient.getTransaction(
-      signature,
-      encoding: Encoding.jsonParsed,
-    );
+    // Use raw HTTP request because the Solana package's toJson()
+    // loses the 'owner' field from preTokenBalances/postTokenBalances
+    final httpClient = HttpClient();
+    try {
+      final request = await httpClient.postUrl(_rpcUrl);
+      request.headers.contentType = ContentType.json;
+      request.write(jsonEncode({
+        'jsonrpc': '2.0',
+        'id': 1,
+        'method': 'getTransaction',
+        'params': [
+          signature,
+          {'encoding': 'jsonParsed', 'maxSupportedTransactionVersion': 0}
+        ],
+      }));
+      final response = await request.close();
+      final responseBody = await response.transform(utf8.decoder).join();
+      final data = jsonDecode(responseBody) as Map<String, dynamic>;
 
-    if (tx == null) {
-      throw Exception('Transaction not found: $signature');
+      if (data.containsKey('error')) {
+        throw Exception('RPC error: ${data['error']}');
+      }
+
+      final result = data['result'];
+      if (result == null) {
+        throw Exception('Transaction not found: $signature');
+      }
+
+      return result as Map<String, dynamic>;
+    } finally {
+      httpClient.close();
     }
-
-    return {
-      'meta': tx.meta?.toJson(),
-      'transaction': tx.transaction.toJson(),
-    };
   }
 
   @override
