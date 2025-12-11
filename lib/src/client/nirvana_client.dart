@@ -424,6 +424,32 @@ class NirvanaClient {
     return (match?['change'] as double?) ?? 0.0;
   }
 
+  /// Build a map of token account addresses to their mint addresses
+  /// from the transaction's token balance data
+  Map<String, String> _buildAccountToMintMap(
+    List accountKeys,
+    List preTokenBalances,
+    List postTokenBalances,
+  ) {
+    final accountToMint = <String, String>{};
+
+    // Process both pre and post balances to get account->mint mappings
+    for (final balance in [...preTokenBalances, ...postTokenBalances]) {
+      final accountIndex = balance['accountIndex'] as int?;
+      final mint = balance['mint'] as String?;
+
+      if (accountIndex != null && mint != null && accountIndex < accountKeys.length) {
+        final accountKey = accountKeys[accountIndex];
+        final address = accountKey is String ? accountKey : accountKey['pubkey'] as String?;
+        if (address != null) {
+          accountToMint[address] = mint;
+        }
+      }
+    }
+
+    return accountToMint;
+  }
+
   Future<Uint8List> _fetchPriceCurveAccountData() async {
     final accountInfo = await _rpcClient.getAccountInfo(_config.priceCurve);
 
@@ -766,6 +792,10 @@ class NirvanaClient {
     final postTokenBalances = meta['postTokenBalances'] as List? ?? [];
     final allChanges = _extractBalanceChanges(preTokenBalances, postTokenBalances);
 
+    // Build map of token account address -> mint address from token balances
+    // This is needed to resolve mint for simple transfer instructions
+    final accountToMint = _buildAccountToMintMap(accountKeys, preTokenBalances, postTokenBalances);
+
     // Separate by owner
     final tenantChanges = allChanges.where((c) => c['owner'] == _config.tenantAccount).toList();
     final userChanges = allChanges.where((c) => c['owner'] != _config.tenantAccount).toList();
@@ -779,7 +809,7 @@ class NirvanaClient {
     // Parse inner instructions for burn/mint operations (fallback if balance changes are 0)
     final innerInstructions = meta['innerInstructions'] as List? ?? [];
     final burnMintChanges = _parseBurnMintOperations(instructions, innerInstructions);
-    final feeTransfers = _parseFeeTransfers(instructions, innerInstructions);
+    final feeTransfers = _parseFeeTransfers(instructions, innerInstructions, accountToMint);
 
     if (anaChange == 0.0) {
       anaChange = burnMintChanges['ANA'] ?? 0.0;
@@ -1016,7 +1046,14 @@ class NirvanaClient {
   /// Fees can be:
   /// - Mints to fee account (42rJYSmYHqbn5mk992xAoKZnWEiuMzr6u6ydj9m8fAjP) for buy transactions
   /// - Transfers to fee account for other transactions
-  Map<String, double> _parseFeeTransfers(List instructions, List innerInstructions) {
+  ///
+  /// [accountToMint] maps token account addresses to their mint addresses
+  /// (used to resolve mint for simple transfer instructions that don't include it)
+  Map<String, double> _parseFeeTransfers(
+    List instructions,
+    List innerInstructions,
+    Map<String, String> accountToMint,
+  ) {
     const String feeAccount = '42rJYSmYHqbn5mk992xAoKZnWEiuMzr6u6ydj9m8fAjP';
     final fees = <String, double>{};
 
@@ -1047,10 +1084,16 @@ class NirvanaClient {
       // Track transfers to fee account (fee on sell/other)
       if (type == 'transfer' || type == 'transferChecked') {
         final destination = info['destination'] as String?;
-        final mint = info['mint'] as String?;
+        final source = info['source'] as String?;
+        String? mint = info['mint'] as String?;
 
         // Only track transfers to the fee account
         if (destination != feeAccount) return;
+
+        // For simple 'transfer' instructions, mint is not included - look it up from source account
+        if (mint == null && source != null) {
+          mint = accountToMint[source];
+        }
 
         double? uiAmount;
         if (type == 'transferChecked') {
