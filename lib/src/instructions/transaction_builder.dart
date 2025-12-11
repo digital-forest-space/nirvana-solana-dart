@@ -350,4 +350,36 @@ class NirvanaTransactionBuilder {
       data: ByteArray(Uint8List.fromList(instructionData)),
     );
   }
+
+  /// Build claim prANA instruction (claims accumulated prANA rewards)
+  /// Based on Chrome injection analysis of actual claim transactions
+  Instruction buildClaimPranaInstruction({
+    required String userPubkey,
+    required String personalAccount,
+    required String userPranaAccount,
+  }) {
+    // claim_prana discriminator (from browser injection log)
+    final discriminator = [47, 124, 203, 241, 4, 53, 226, 166];
+
+    // No amount parameter - claims all available prANA
+    final instructionData = [...discriminator];
+
+    // Build accounts in exact order from Chrome injection analysis (6 accounts)
+    // Instruction 5 from claim_prANA.log:
+    // 0: user (signer), 1: tenant, 2: pranaMint, 3: userPranaAccount, 4: personalAccount, 5: tokenProgram
+    final accounts = [
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userPubkey), isSigner: true, isWriteable: true),              // 0: user/signer
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.tenantAccount), isSigner: false, isWriteable: true),  // 1: tenant
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.pranaMint), isSigner: false, isWriteable: true),      // 2: prANA mint
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userPranaAccount), isSigner: false, isWriteable: true),       // 3: user prANA account
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(personalAccount), isSigner: false, isWriteable: true),        // 4: personal account
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(tokenProgram), isSigner: false, isWriteable: false),          // 5: token program
+    ];
+
+    return Instruction(
+      programId: Ed25519HDPublicKey.fromBase58(_config.programId),
+      accounts: accounts,
+      data: ByteArray(Uint8List.fromList(instructionData)),
+    );
+  }
 }

@@ -33,6 +33,7 @@ class NirvanaClient {
   static const List<int> _borrowNirvDiscriminator = [155, 1, 43, 62, 79, 104, 66, 42];
   static const List<int> _repayDiscriminator = [28, 158, 130, 191, 125, 127, 195, 94];
   static const List<int> _realizeDiscriminator = [64, 34, 113, 17, 141, 79, 61, 38];
+  static const List<int> _claimPranaDiscriminator = [47, 124, 203, 241, 4, 53, 226, 166];
 
   final SolanaRpcClient _rpcClient;
   final NirvanaTransactionBuilder _transactionBuilder;
@@ -969,6 +970,9 @@ class NirvanaClient {
     if (_listEquals(discriminator, _realizeDiscriminator)) {
       return NirvanaTransactionType.realize;
     }
+    if (_listEquals(discriminator, _claimPranaDiscriminator)) {
+      return NirvanaTransactionType.claimPrana;
+    }
     return NirvanaTransactionType.unknown;
   }
 
@@ -1451,12 +1455,49 @@ class NirvanaClient {
     }
   }
   
+  /// Claim accumulated prANA rewards from staking
+  /// Claims all available prANA - no amount parameter needed
   Future<TransactionResult> claimPrana({
     required String userPubkey,
     required Ed25519HDKeyPair keypair,
   }) async {
-    // TODO: Implement
-    throw UnimplementedError('claimPrana not yet implemented');
+    try {
+      // Find personal account
+      final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
+      if (personalAccount == null) {
+        throw Exception('User does not have a personal account (must stake first)');
+      }
+
+      // Resolve user token accounts
+      final accounts = await _accountResolver.resolveUserAccounts(userPubkey);
+      if (accounts.pranaAccount == null) {
+        throw Exception('User does not have prANA token account');
+      }
+
+      // Build claim instruction
+      final instruction = _transactionBuilder.buildClaimPranaInstruction(
+        userPubkey: userPubkey,
+        personalAccount: personalAccount,
+        userPranaAccount: accounts.pranaAccount!,
+      );
+
+      // Create and send transaction
+      final message = Message(instructions: [instruction]);
+      final signature = await _rpcClient.sendAndConfirmTransaction(
+        message: message,
+        signers: [keypair],
+      );
+
+      return TransactionResult.success(
+        signature: signature,
+        logs: ['Claim prANA transaction successful'],
+      );
+    } catch (e) {
+      return TransactionResult.failure(
+        signature: '',
+        error: e.toString(),
+      );
+    }
   }
   
   /// Repay NIRV debt by burning NIRV tokens
