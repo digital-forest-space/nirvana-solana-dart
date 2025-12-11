@@ -921,14 +921,50 @@ class NirvanaClient {
     }
   }
   
-  // Stub implementations for remaining methods
+  /// Unstake (withdraw) ANA tokens from staking position
   Future<TransactionResult> unstakeAna({
     required String userPubkey,
     required Ed25519HDKeyPair keypair,
     required double anaAmount,
   }) async {
-    // TODO: Implement
-    throw UnimplementedError('unstakeAna not yet implemented');
+    try {
+      // Find personal account (required for unstake)
+      final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
+      if (personalAccount == null) {
+        throw Exception('PersonalAccount not found. You need to have staked tokens first.');
+      }
+
+      // Resolve user accounts
+      final accounts = await _accountResolver.resolveUserAccounts(userPubkey);
+      if (accounts.anaAccount == null) {
+        throw Exception('User does not have ANA token account');
+      }
+
+      // Convert to lamports (ANA has 6 decimals)
+      final anaLamports = (anaAmount * 1000000).toInt();
+
+      // Build withdraw instruction
+      final instruction = _transactionBuilder.buildWithdrawAnaInstruction(
+        userPubkey: userPubkey,
+        userAnaAccount: accounts.anaAccount!,
+        personalAccount: personalAccount,
+        anaLamports: anaLamports,
+      );
+
+      // Create and send transaction
+      final message = Message(instructions: [instruction]);
+      final signature = await _rpcClient.sendAndConfirmTransaction(
+        message: message,
+        signers: [keypair],
+      );
+
+      return TransactionResult.success(
+        signature: signature,
+        logs: ['Unstake ANA transaction successful'],
+      );
+    } catch (e) {
+      return TransactionResult.failure(error: e.toString());
+    }
   }
   
   Future<TransactionResult> claimPrana({

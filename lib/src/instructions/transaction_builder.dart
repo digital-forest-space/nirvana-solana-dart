@@ -152,6 +152,47 @@ class NirvanaTransactionBuilder {
     );
   }
   
+  /// Build withdraw_ana (unstake) instruction
+  /// Based on companion unstake_ana_v2.dart
+  Instruction buildWithdrawAnaInstruction({
+    required String userPubkey,
+    required String userAnaAccount,
+    required String personalAccount,
+    required int anaLamports,
+  }) {
+    // withdraw_ana discriminator (from companion unstake_ana_v2.dart)
+    final discriminator = [170, 150, 147, 148, 157, 219, 87, 15];
+
+    // Vault ANA account (source for withdrawn tokens)
+    const String vaultAnaAccount = 'FPBKzFDgeqfekR2vW4qKyyNiMbcDCGqofoofLqSm3A4k';
+
+    // Build instruction data
+    final amountBytes = Uint8List(8);
+    amountBytes.buffer.asByteData().setUint64(0, anaLamports, Endian.little);
+
+    final instructionData = [
+      ...discriminator,
+      ...amountBytes,
+    ];
+
+    // Build accounts in exact order from companion (7 accounts)
+    final accounts = [
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userPubkey), isSigner: true, isWriteable: true),           // 0: user/signer
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.tenantAccount), isSigner: false, isWriteable: true), // 1: tenant
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(personalAccount), isSigner: false, isWriteable: true),       // 2: personal account
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.anaMint), isSigner: false, isWriteable: true),        // 3: ANA mint
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userAnaAccount), isSigner: false, isWriteable: true),         // 4: user ANA account (destination)
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(vaultAnaAccount), isSigner: false, isWriteable: true),        // 5: vault ANA account (source)
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(tokenProgram), isSigner: false, isWriteable: false),          // 6: token program
+    ];
+
+    return Instruction(
+      programId: Ed25519HDPublicKey.fromBase58(_config.programId),
+      accounts: accounts,
+      data: ByteArray(Uint8List.fromList(instructionData)),
+    );
+  }
+
   /// Build init_personal_account instruction
   Instruction buildInitPersonalAccountInstruction({
     required String userPubkey,
