@@ -8,11 +8,11 @@ void main() {
 
   final builder = NirvanaTransactionBuilder();
 
-  // Test accounts (from companion's browser-intercepted transaction)
-  const userPubkey = 'YOUR_WALLET_ADDRESS_HERE';
-  const userNirvAccount = '2MxgvoCvsrwBFHGAKchXJvCDFP7U4XNKA5TDE5Mg5ckh';
-  const userAnaAccount = '3H7ih6Q1CiavvKSAoci6drN4c1rdKnHyTN3uqcZnmBFF';
-  const userUsdcAccount = '7fjbQwUk34xaRicyM8UKsjKz5MvM4ZJzw7pxoWZBY9Mi'; // Valid base58
+  // Test accounts (example addresses for instruction building verification)
+  const userPubkey = 'ExampleUser11111111111111111111111111111111';
+  const userNirvAccount = 'ExampleNirv1111111111111111111111111111111';
+  const userAnaAccount = 'ExampleAna11111111111111111111111111111111';
+  const userUsdcAccount = 'ExampleUsdc1111111111111111111111111111111';
 
   // Expected account order from companion (browser-intercepted):
   // 0: User wallet (signer)

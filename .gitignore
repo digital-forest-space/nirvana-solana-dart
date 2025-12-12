@@ -51,3 +51,5 @@ app.*.map.json
 android/key.properties
 android/key2.properties
 
+# Claude Code local settings
+.claude/
