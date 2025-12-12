@@ -19,12 +19,6 @@ import '../utils/retry.dart';
 class NirvanaClient {
   static const List<int> _tenantDiscriminator = [61, 43, 215, 51, 232, 242, 209, 170];
 
-  // Token mints
-  static const String _anaMint = '5DkzT65YJvCsZcot9L6qwkJnsBCPmKHjJz3QU7t7QeRW';
-  static const String _nirvMint = '3eamaYJ7yicyRd3mYz4YeNyNPGVo6zMmKUp5UP25AxRM';
-  static const String _usdcMint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
-  static const String _pranaMint = 'CLr7G2af9VSfH1PFZ5fYvB8WK1DTgE85qrVjpa8Xkg4N';
-
   // Instruction discriminators for transaction type identification
   static const List<int> _buyExact2Discriminator = [109, 5, 199, 243, 164, 233, 19, 152];
   static const List<int> _sell2Discriminator = [47, 191, 120, 1, 28, 35, 253, 79];
@@ -73,7 +67,7 @@ class NirvanaClient {
         ana: ana,
         floor: floor,
         prana: prana,
-        lastUpdated: DateTime.now().toUtc(),
+        updatedAt: DateTime.now().toUtc(),
       );
     } catch (e) {
       throw Exception('Failed to fetch Nirvana prices: $e');
@@ -244,21 +238,21 @@ class NirvanaClient {
     final userChanges = allChanges.where((c) => c['owner'] != _config.tenantAccount).toList();
 
     // Check if prANA is involved - skip if so (these are staking operations)
-    final pranaUserChange = _getChangeForMint(userChanges, _pranaMint);
-    final pranaTenantChange = _getChangeForMint(tenantChanges, _pranaMint);
+    final pranaUserChange = _getChangeForMint(userChanges, _config.pranaMint);
+    final pranaTenantChange = _getChangeForMint(tenantChanges, _config.pranaMint);
     if (pranaUserChange != 0.0 || pranaTenantChange != 0.0) {
       throw Exception('prANA involved - not a buy/sell transaction');
     }
 
     // Get balance changes
-    double anaUserChange = _getChangeForMint(userChanges, _anaMint);
-    double nirvUserChange = _getChangeForMint(userChanges, _nirvMint);
-    double usdcUserChange = _getChangeForMint(userChanges, _usdcMint);
+    double anaUserChange = _getChangeForMint(userChanges, _config.anaMint);
+    double nirvUserChange = _getChangeForMint(userChanges, _config.nirvMint);
+    double usdcUserChange = _getChangeForMint(userChanges, _config.usdcMint);
 
     // Fall back to instruction-based changes if balance changes are 0
     if (anaUserChange == 0.0) {
       for (final entry in burnMintChanges.entries) {
-        if (entry.key.contains(_anaMint)) {
+        if (entry.key.contains(_config.anaMint)) {
           anaUserChange += entry.value;
         }
       }
@@ -266,7 +260,7 @@ class NirvanaClient {
 
     if (nirvUserChange == 0.0) {
       for (final entry in burnMintChanges.entries) {
-        if (entry.key.contains(_nirvMint)) {
+        if (entry.key.contains(_config.nirvMint)) {
           nirvUserChange += entry.value;
         }
       }
@@ -274,7 +268,7 @@ class NirvanaClient {
 
     if (usdcUserChange == 0.0) {
       for (final entry in burnMintChanges.entries) {
-        if (entry.key.contains(_usdcMint)) {
+        if (entry.key.contains(_config.usdcMint)) {
           usdcUserChange += entry.value;
         }
       }
@@ -284,9 +278,9 @@ class NirvanaClient {
     double anaBurnMint = 0.0;
     double nirvBurnMint = 0.0;
     for (final entry in burnMintChanges.entries) {
-      if (entry.key.contains(_anaMint)) {
+      if (entry.key.contains(_config.anaMint)) {
         anaBurnMint += entry.value;
-      } else if (entry.key.contains(_nirvMint)) {
+      } else if (entry.key.contains(_config.nirvMint)) {
         nirvBurnMint += entry.value;
       }
     }
@@ -296,11 +290,11 @@ class NirvanaClient {
     double nirvFee = 0.0;
     double usdcFee = 0.0;
     for (final entry in feeChanges.entries) {
-      if (entry.key.contains(_anaMint)) {
+      if (entry.key.contains(_config.anaMint)) {
         anaFee += entry.value.abs();
-      } else if (entry.key.contains(_nirvMint)) {
+      } else if (entry.key.contains(_config.nirvMint)) {
         nirvFee += entry.value.abs();
-      } else if (entry.key.contains(_usdcMint)) {
+      } else if (entry.key.contains(_config.usdcMint)) {
         usdcFee += entry.value.abs();
       }
     }
@@ -804,10 +798,10 @@ class NirvanaClient {
     final userChanges = allChanges.where((c) => c['owner'] != _config.tenantAccount).toList();
 
     // Get balance changes for each token
-    double anaChange = _getChangeForMint(userChanges, _anaMint);
-    double nirvChange = _getChangeForMint(userChanges, _nirvMint);
-    double usdcChange = _getChangeForMint(userChanges, _usdcMint);
-    double pranaChange = _getChangeForMint(userChanges, _pranaMint);
+    double anaChange = _getChangeForMint(userChanges, _config.anaMint);
+    double nirvChange = _getChangeForMint(userChanges, _config.nirvMint);
+    double usdcChange = _getChangeForMint(userChanges, _config.usdcMint);
+    double pranaChange = _getChangeForMint(userChanges, _config.pranaMint);
 
     // Parse inner instructions for burn/mint operations (fallback if balance changes are 0)
     final innerInstructions = meta['innerInstructions'] as List? ?? [];
@@ -1167,10 +1161,10 @@ class NirvanaClient {
   }
 
   String _mintToCurrency(String mint) {
-    if (mint == _anaMint) return 'ANA';
-    if (mint == _nirvMint) return 'NIRV';
-    if (mint == _usdcMint) return 'USDC';
-    if (mint == _pranaMint) return 'prANA';
+    if (mint == _config.anaMint) return 'ANA';
+    if (mint == _config.nirvMint) return 'NIRV';
+    if (mint == _config.usdcMint) return 'USDC';
+    if (mint == _config.pranaMint) return 'prANA';
     return mint.substring(0, 8);
   }
 
