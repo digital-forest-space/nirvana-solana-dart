@@ -44,13 +44,17 @@ abstract class SolanaRpcClient {
 class DefaultSolanaRpcClient implements SolanaRpcClient {
   final SolanaClient _client;
   final Uri _rpcUrl;
+  final Duration _timeout;
 
   /// Creates a DefaultSolanaRpcClient with an explicit RPC URL.
   /// The URL is needed for raw HTTP requests (e.g., getTransaction)
   /// since the SolanaClient doesn't expose its URL.
-  DefaultSolanaRpcClient(SolanaClient client, {Uri? rpcUrl})
+  ///
+  /// [timeout] sets the timeout for HTTP requests (default: 30 seconds)
+  DefaultSolanaRpcClient(SolanaClient client, {Uri? rpcUrl, Duration? timeout})
       : _client = client,
-        _rpcUrl = rpcUrl ?? Uri.parse('https://api.mainnet-beta.solana.com');
+        _rpcUrl = rpcUrl ?? Uri.parse('https://api.mainnet-beta.solana.com'),
+        _timeout = timeout ?? const Duration(seconds: 30);
   
   @override
   Future<Map<String, dynamic>> getAccountInfo(String address) async {
@@ -133,7 +137,7 @@ class DefaultSolanaRpcClient implements SolanaRpcClient {
   Future<Map<String, dynamic>> getTransaction(String signature) async {
     // Use raw HTTP request because the Solana package's toJson()
     // loses the 'owner' field from preTokenBalances/postTokenBalances
-    final httpClient = HttpClient();
+    final httpClient = HttpClient()..connectionTimeout = _timeout;
     try {
       final request = await httpClient.postUrl(_rpcUrl);
       request.headers.contentType = ContentType.json;
@@ -146,8 +150,8 @@ class DefaultSolanaRpcClient implements SolanaRpcClient {
           {'encoding': 'jsonParsed', 'maxSupportedTransactionVersion': 0}
         ],
       }));
-      final response = await request.close();
-      final responseBody = await response.transform(utf8.decoder).join();
+      final response = await request.close().timeout(_timeout);
+      final responseBody = await response.transform(utf8.decoder).join().timeout(_timeout);
       final data = jsonDecode(responseBody) as Map<String, dynamic>;
 
       if (data.containsKey('error')) {

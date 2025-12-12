@@ -1,8 +1,6 @@
 import 'dart:convert';
-import 'dart:math';
 import 'dart:typed_data';
 import 'package:solana/solana.dart';
-import 'package:solana/encoder.dart';
 
 import '../models/config.dart';
 import '../models/prices.dart';
@@ -43,12 +41,22 @@ class NirvanaClient {
        _transactionBuilder = NirvanaTransactionBuilder(config: config),
        _accountResolver = NirvanaAccountResolver(rpcClient, config: config);
 
-  /// Create a NirvanaClient with a default RPC client
-  factory NirvanaClient.withDefaultRpc({
-    required SolanaClient solanaClient,
+  /// Create a NirvanaClient from just an RPC URL string.
+  /// This is the recommended way to create a client for most use cases.
+  ///
+  /// Example:
+  /// ```dart
+  /// final client = NirvanaClient.fromRpcUrl('https://api.mainnet-beta.solana.com');
+  /// ```
+  factory NirvanaClient.fromRpcUrl(
+    String rpcUrl, {
+    Duration? timeout,
     NirvanaConfig? config,
   }) {
-    final rpcClient = DefaultSolanaRpcClient(solanaClient);
+    final uri = Uri.parse(rpcUrl);
+    final wsUrl = Uri.parse(rpcUrl.replaceFirst('https', 'wss'));
+    final solanaClient = SolanaClient(rpcUrl: uri, websocketUrl: wsUrl);
+    final rpcClient = DefaultSolanaRpcClient(solanaClient, rpcUrl: uri, timeout: timeout);
     return NirvanaClient(rpcClient: rpcClient, config: config);
   }
 

@@ -105,13 +105,14 @@ import 'package:nirvana_solana/nirvana_solana.dart';
 import 'package:solana/solana.dart';
 
 void main() async {
-  // Create clients
-  final solanaClient = SolanaClient(
-    rpcUrl: Uri.parse('https://api.mainnet-beta.solana.com'),
-    websocketUrl: Uri.parse('wss://api.mainnet-beta.solana.com'),
+  // Create client from RPC URL
+  final client = NirvanaClient.fromRpcUrl('https://api.mainnet-beta.solana.com');
+
+  // Or with custom timeout
+  final clientWithTimeout = NirvanaClient.fromRpcUrl(
+    'https://api.mainnet-beta.solana.com',
+    timeout: Duration(seconds: 60),
   );
-  final rpcClient = DefaultSolanaRpcClient(solanaClient, rpcUrl: Uri.parse('https://api.mainnet-beta.solana.com'));
-  final client = NirvanaClient(rpcClient: rpcClient);
 
   // Fetch floor price
   final floorPrice = await client.fetchFloorPrice();

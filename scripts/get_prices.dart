@@ -27,9 +27,7 @@ void main(List<String> args) async {
 
   // Create client
   if (verbose) print('RPC: $rpcUrl');
-  final solanaClient = SolanaClient(rpcUrl: Uri.parse(rpcUrl), websocketUrl: Uri.parse(rpcUrl.replaceFirst('https', 'wss')));
-  final rpcClient = DefaultSolanaRpcClient(solanaClient, rpcUrl: Uri.parse(rpcUrl));
-  final client = NirvanaClient(rpcClient: rpcClient);
+  final client = NirvanaClient.fromRpcUrl(rpcUrl);
 
   try {
     if (verbose) print('\nFetching prices...');
