@@ -55,8 +55,9 @@ class NirvanaClient {
   }) {
     final uri = Uri.parse(rpcUrl);
     final wsUrl = Uri.parse(rpcUrl.replaceFirst('https', 'wss'));
-    final solanaClient = SolanaClient(rpcUrl: uri, websocketUrl: wsUrl);
-    final rpcClient = DefaultSolanaRpcClient(solanaClient, rpcUrl: uri, timeout: timeout);
+    final effectiveTimeout = timeout ?? const Duration(seconds: 30);
+    final solanaClient = SolanaClient(rpcUrl: uri, websocketUrl: wsUrl, timeout: effectiveTimeout);
+    final rpcClient = DefaultSolanaRpcClient(solanaClient, rpcUrl: uri, timeout: effectiveTimeout);
     return NirvanaClient(rpcClient: rpcClient, config: config);
   }
 
