@@ -32,12 +32,25 @@ abstract class SolanaRpcClient {
   });
 
   /// Find program accounts with filters (for PersonalAccount lookup)
+  /// If memcmpOffset and memcmpBytes are omitted, only filters by dataSize.
   Future<List<Map<String, dynamic>>> getProgramAccounts(
     String programId, {
     required int dataSize,
-    required int memcmpOffset,
-    required String memcmpBytes,
+    int? memcmpOffset,
+    String? memcmpBytes,
   });
+
+  /// Simulate a transaction (for getting return data without signing)
+  Future<Map<String, dynamic>> simulateTransaction(String txBase64);
+
+  /// Simulate a transaction and return post-state of specified accounts
+  Future<Map<String, dynamic>> simulateTransactionWithAccounts(
+    String txBase64,
+    List<String> accountAddresses,
+  );
+
+  /// Get recent blockhash
+  Future<String> getLatestBlockhash();
 }
 
 /// Default implementation using solana package
@@ -84,7 +97,7 @@ class DefaultSolanaRpcClient implements SolanaRpcClient {
       'data': dataArray,
     };
   }
-  
+
   @override
   Future<double> getTokenBalance(String tokenAccount) async {
     final pubKey = Ed25519HDPublicKey.fromBase58(tokenAccount);
@@ -188,19 +201,23 @@ class DefaultSolanaRpcClient implements SolanaRpcClient {
   Future<List<Map<String, dynamic>>> getProgramAccounts(
     String programId, {
     required int dataSize,
-    required int memcmpOffset,
-    required String memcmpBytes,
+    int? memcmpOffset,
+    String? memcmpBytes,
   }) async {
-    // Convert base58 pubkey string to bytes for memcmp filter
-    final pubkeyBytes = Ed25519HDPublicKey.fromBase58(memcmpBytes).bytes;
+    final filters = <ProgramDataFilter>[
+      ProgramDataFilter.dataSize(dataSize),
+    ];
+
+    // Add memcmp filter if both offset and bytes are provided
+    if (memcmpOffset != null && memcmpBytes != null) {
+      final pubkeyBytes = Ed25519HDPublicKey.fromBase58(memcmpBytes).bytes;
+      filters.add(ProgramDataFilter.memcmp(offset: memcmpOffset, bytes: pubkeyBytes));
+    }
 
     final accounts = await _client.rpcClient.getProgramAccounts(
       programId,
       encoding: Encoding.base64,
-      filters: [
-        ProgramDataFilter.dataSize(dataSize),
-        ProgramDataFilter.memcmp(offset: memcmpOffset, bytes: pubkeyBytes),
-      ],
+      filters: filters,
     );
 
     return accounts.map((account) {
@@ -215,5 +232,89 @@ class DefaultSolanaRpcClient implements SolanaRpcClient {
         },
       };
     }).toList();
+  }
+
+  @override
+  Future<Map<String, dynamic>> simulateTransaction(String txBase64) async {
+    // Use raw HTTP since the solana package doesn't expose simulation return data
+    final client = HttpClient();
+    try {
+      final request = await client.postUrl(_rpcUrl).timeout(_timeout);
+      request.headers.set('Content-Type', 'application/json');
+      request.write(jsonEncode({
+        'jsonrpc': '2.0',
+        'id': 1,
+        'method': 'simulateTransaction',
+        'params': [
+          txBase64,
+          {
+            'encoding': 'base64',
+            'commitment': 'confirmed',
+            'sigVerify': false,
+            'replaceRecentBlockhash': true,
+          }
+        ]
+      }));
+
+      final response = await request.close().timeout(_timeout);
+      final body = await response.transform(utf8.decoder).join().timeout(_timeout);
+      final json = jsonDecode(body);
+
+      if (json['error'] != null) {
+        throw Exception('RPC error: ${json['error']}');
+      }
+
+      return json['result']?['value'] as Map<String, dynamic>? ?? {};
+    } finally {
+      client.close();
+    }
+  }
+
+  @override
+  Future<String> getLatestBlockhash() async {
+    final result = await _client.rpcClient.getLatestBlockhash();
+    return result.value.blockhash;
+  }
+
+  @override
+  Future<Map<String, dynamic>> simulateTransactionWithAccounts(
+    String txBase64,
+    List<String> accountAddresses,
+  ) async {
+    final client = HttpClient();
+    try {
+      final request = await client.postUrl(_rpcUrl);
+      request.headers.set('Content-Type', 'application/json');
+      request.write(jsonEncode({
+        'jsonrpc': '2.0',
+        'id': 1,
+        'method': 'simulateTransaction',
+        'params': [
+          txBase64,
+          {
+            'encoding': 'base64',
+            'commitment': 'confirmed',
+            'sigVerify': false,
+            'replaceRecentBlockhash': true,
+            'accounts': {
+              'encoding': 'base64',
+              'addresses': accountAddresses,
+            },
+          },
+        ],
+      }));
+
+      final response = await request.close().timeout(_timeout);
+      final body = await response.transform(utf8.decoder).join().timeout(_timeout);
+      final json = jsonDecode(body);
+
+      if (json['error'] != null) {
+        throw Exception('RPC error: ${json['error']}');
+      }
+
+      return json['result']?['value'] as Map<String, dynamic>? ?? {};
+    } finally {
+      client.close();
+    }
   }
 }

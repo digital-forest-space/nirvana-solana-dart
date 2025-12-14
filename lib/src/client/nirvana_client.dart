@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:solana/solana.dart';
+import 'package:solana/encoder.dart';
 
 import '../models/config.dart';
 import '../models/prices.dart';
@@ -734,6 +735,239 @@ class NirvanaClient {
   /// Get user's token balances (ANA, NIRV, USDC, prANA)
   Future<Map<String, double>> getUserBalances(String userPubkey) async {
     return await _accountResolver.getUserBalances(userPubkey);
+  }
+
+  /// Get claimable prANA amount via simulation
+  ///
+  /// Simulates the `stage_prana` instruction and reads the calculated
+  /// claimable amount from the post-simulation PersonalAccount at offset 120.
+  ///
+  /// This gives the exact amount the protocol calculates.
+  Future<double> getClaimablePrana(String userPubkey) async {
+    // Get user's personal account
+    final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
+    if (personalAccount == null) {
+      return 0.0;
+    }
+
+    // Build stage_prana instruction
+    // discriminator: [54, 112, 82, 14, 216, 131, 165, 126]
+    final discriminator = Uint8List.fromList([54, 112, 82, 14, 216, 131, 165, 126]);
+
+    final instruction = Instruction(
+      programId: Ed25519HDPublicKey.fromBase58(_config.programId),
+      accounts: [
+        AccountMeta.writeable(
+            pubKey: Ed25519HDPublicKey.fromBase58(_config.tenantAccount), isSigner: false),
+        AccountMeta.writeable(
+            pubKey: Ed25519HDPublicKey.fromBase58(personalAccount), isSigner: false),
+      ],
+      data: ByteArray(discriminator),
+    );
+
+    // Get recent blockhash for simulation
+    final blockhash = await _rpcClient.getLatestBlockhash();
+
+    // Build message with fee payer
+    final message = Message.only(instruction);
+    final compiledMessage = message.compile(
+      recentBlockhash: blockhash,
+      feePayer: Ed25519HDPublicKey.fromBase58(userPubkey),
+    );
+
+    // Serialize the transaction for simulation
+    final serializedMessage = compiledMessage.toByteArray().toList();
+    final txBytes = <int>[
+      1, // signature count
+      ...List.filled(64, 0), // Empty signature (simulation doesn't verify)
+      ...serializedMessage,
+    ];
+    final txBase64 = base64Encode(txBytes);
+
+    // Simulate transaction with accounts option to get post-state
+    final simResult = await _rpcClient.simulateTransactionWithAccounts(
+      txBase64,
+      [personalAccount],
+    );
+
+    // Check for errors
+    if (simResult['err'] != null) {
+      return 0.0;
+    }
+
+    // Read claimable prANA from post-simulation PersonalAccount offset 120
+    final accounts = simResult['accounts'] as List?;
+    if (accounts == null || accounts.isEmpty) {
+      return 0.0;
+    }
+
+    final postAccount = accounts[0];
+    if (postAccount == null || postAccount['data'] == null) {
+      return 0.0;
+    }
+
+    final postData = base64Decode(postAccount['data'][0]);
+    if (postData.length < 128) {
+      return 0.0;
+    }
+
+    // Read claimable prANA from offset 120 (u64)
+    final claimableRaw = ByteData.sublistView(
+        Uint8List.fromList(postData.sublist(120, 128))).getUint64(0, Endian.little);
+
+    return claimableRaw / 1000000.0;
+  }
+
+  /// Get claimable revenue share amounts
+  ///
+  /// Reads the staged claimable amounts directly from PersonalAccount:
+  /// - field_21 (offset 224): staged claimable ANA
+  /// - field_26 (offset 264): staged claimable NIRV
+  ///
+  /// Note: These values are populated after `stage_rev_prana` is called.
+  /// If the user hasn't staged yet, this returns 0. Use `getClaimableRevshareViaSimulation`
+  /// to get the amounts that WOULD be claimable without affecting state.
+  ///
+  /// Returns a map with 'ANA' and 'NIRV' claimable amounts.
+  Future<Map<String, double>> getClaimableRevshare(String userPubkey) async {
+    // Get user's personal account
+    final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
+    if (personalAccount == null) {
+      return {'ANA': 0.0, 'NIRV': 0.0};
+    }
+
+    // Read account data
+    final accountInfo = await _rpcClient.getAccountInfo(personalAccount);
+    if (accountInfo.isEmpty || accountInfo['data'] == null) {
+      return {'ANA': 0.0, 'NIRV': 0.0};
+    }
+
+    final accountData = base64Decode(accountInfo['data'][0]);
+    if (accountData.length < 272) {
+      return {'ANA': 0.0, 'NIRV': 0.0};
+    }
+
+    // Read staged claimable amounts from PersonalAccount
+    // field_21 (offset 224): staged claimable ANA (u64)
+    // field_26 (offset 264): staged claimable NIRV (u64)
+    final stagedAna = ByteData.sublistView(
+        Uint8List.fromList(accountData.sublist(224, 232))).getUint64(0, Endian.little);
+    final stagedNirv = ByteData.sublistView(
+        Uint8List.fromList(accountData.sublist(264, 272))).getUint64(0, Endian.little);
+
+    return {
+      'ANA': stagedAna / 1000000.0,
+      'NIRV': stagedNirv / 1000000.0,
+    };
+  }
+
+  /// Get claimable revenue share via simulation (doesn't modify state)
+  ///
+  /// Simulates the `stage_rev_prana` instruction to calculate what amounts
+  /// WOULD be claimable without actually staging them. This is useful to
+  /// preview claimable amounts before the user decides to claim.
+  ///
+  /// Returns a map with 'ANA' and 'NIRV' claimable amounts.
+  Future<Map<String, double>> getClaimableRevshareViaSimulation(String userPubkey) async {
+    // Get user's personal account
+    final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
+    if (personalAccount == null) {
+      return {'ANA': 0.0, 'NIRV': 0.0};
+    }
+
+    // Build stage_rev_prana instruction
+    // discriminator: [66, 99, 75, 75, 81, 176, 254, 169]
+    final discriminator = Uint8List.fromList([66, 99, 75, 75, 81, 176, 254, 169]);
+
+    final instruction = Instruction(
+      programId: Ed25519HDPublicKey.fromBase58(_config.programId),
+      accounts: [
+        AccountMeta.writeable(
+            pubKey: Ed25519HDPublicKey.fromBase58(personalAccount), isSigner: false),
+        AccountMeta.readonly(
+            pubKey: Ed25519HDPublicKey.fromBase58(_config.tenantAccount), isSigner: false),
+      ],
+      data: ByteArray(discriminator),
+    );
+
+    // Get recent blockhash for simulation
+    final blockhash = await _rpcClient.getLatestBlockhash();
+
+    // Build message with fee payer (user's pubkey, though simulation doesn't need actual signature)
+    final message = Message.only(instruction);
+    final compiledMessage = message.compile(
+      recentBlockhash: blockhash,
+      feePayer: Ed25519HDPublicKey.fromBase58(userPubkey),
+    );
+
+    // Serialize the transaction for simulation
+    final serializedMessage = compiledMessage.toByteArray().toList();
+    final signatureCount = 1;
+    final txBytes = <int>[
+      signatureCount,
+      ...List.filled(64, 0), // Empty signature (simulation doesn't verify)
+      ...serializedMessage,
+    ];
+    final txBase64 = base64Encode(txBytes);
+
+    // Simulate transaction to get return data
+    final simResult = await _rpcClient.simulateTransaction(txBase64);
+
+    // Check for errors
+    if (simResult['err'] != null) {
+      return {'ANA': 0.0, 'NIRV': 0.0};
+    }
+
+    // Extract return data
+    List<int>? returnBytes;
+
+    final returnData = simResult['returnData'];
+    if (returnData != null && returnData['data'] != null) {
+      final dataList = returnData['data'] as List;
+      if (dataList.isNotEmpty) {
+        returnBytes = base64Decode(dataList[0]);
+      }
+    }
+
+    // Fallback: extract from logs
+    if (returnBytes == null) {
+      final logs = simResult['logs'] as List?;
+      if (logs != null) {
+        for (final log in logs) {
+          final logStr = log.toString();
+          if (logStr.startsWith('Program return: ${_config.programId} ')) {
+            final parts = logStr.split(' ');
+            if (parts.length >= 4) {
+              returnBytes = base64Decode(parts.last);
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    if (returnBytes == null || returnBytes.length < 128) {
+      return {'ANA': 0.0, 'NIRV': 0.0};
+    }
+
+    // Parse return data structure (128 bytes):
+    // Offset 96: claimable ANA (u64)
+    // Offset 120: claimable NIRV (u64)
+    BigInt readU64(int offset) {
+      BigInt value = BigInt.zero;
+      for (int i = 0; i < 8; i++) {
+        value |= BigInt.from(returnBytes![offset + i]) << (8 * i);
+      }
+      return value;
+    }
+
+    final claimableAna = readU64(96).toDouble() / 1000000.0;
+    final claimableNirv = readU64(120).toDouble() / 1000000.0;
+
+    return {
+      'ANA': claimableAna,
+      'NIRV': claimableNirv,
+    };
   }
 
   /// Parse a Nirvana protocol transaction to extract details

@@ -7,6 +7,7 @@ A Dart client library for interacting with the Nirvana V2 protocol on Solana blo
 | Operation | Description | Script |
 |-----------|-------------|--------|
 | **Get Prices** | Fetch current ANA floor, market, and prANA prices | [get_prices.dart](scripts/get_prices.dart) |
+| **Get Balances** | Fetch all balances: wallet, staked, debt, claimable | [get_balances.dart](scripts/get_balances.dart) |
 | **Buy ANA** | Purchase ANA tokens with USDC or NIRV | [buy_ana.dart](scripts/buy_ana.dart) |
 | **Sell ANA** | Sell ANA tokens for USDC or NIRV | [sell_ana.dart](scripts/sell_ana.dart) |
 | **Stake ANA** | Stake ANA tokens to earn prANA rewards | [stake_ana.dart](scripts/stake_ana.dart) |
@@ -41,6 +42,9 @@ export SOLANA_RPC_URL=https://your-rpc-endpoint.com
 
 # Get current prices
 dart scripts/get_prices.dart
+
+# Get all balances for an address (no keypair needed)
+dart scripts/get_balances.dart <pubkey>
 
 # Buy 10 USDC worth of ANA
 dart scripts/buy_ana.dart ~/.config/solana/id.json 10 --usdc
@@ -98,6 +102,12 @@ Multi-token operations (like realize or claim revenue share) output arrays:
 {"signature":"...","type":"claimRevenueShare","sent":[],"received":[{"amount":0.123,"currency":"ANA"},{"amount":0.456,"currency":"NIRV"}],...}
 ```
 
+Get balances output includes wallet, staked, debt, and claimable amounts:
+
+```json
+{"wallet":{"ANA":4.71,"NIRV":839.11,"USDC":0.88,"prANA":820.58},"staked":{"ANA":11275.43,"prANA":2183.18},"debt":{"NIRV":41493.08},"claimable":{"prANA":118.63,"ANA_revshare":0.087,"NIRV_revshare":0.264}}
+```
+
 ### Using the Library
 
 ```dart
@@ -118,11 +128,19 @@ void main() async {
   final floorPrice = await client.fetchFloorPrice();
   print('Floor Price: \$${floorPrice.toStringAsFixed(6)}');
 
-  // Get user balances
+  // Get user wallet balances
   final balances = await client.getUserBalances('YourPublicKey');
   print('ANA: ${balances['ANA']}');
   print('NIRV: ${balances['NIRV']}');
   print('prANA: ${balances['prANA']}');
+
+  // Get claimable amounts
+  final claimablePrana = await client.getClaimablePrana('YourPublicKey');
+  print('Claimable prANA: $claimablePrana');
+
+  final revshare = await client.getClaimableRevshare('YourPublicKey');
+  print('Claimable ANA revshare: ${revshare['ana']}');
+  print('Claimable NIRV revshare: ${revshare['nirv']}');
 
   // Load keypair and execute transactions
   final keypair = await Ed25519HDKeyPair.fromPrivateKeyBytes(
@@ -157,7 +175,9 @@ void main() async {
 | `fetchFloorPrice()` | Get current ANA floor price |
 | `fetchPrices()` | Get all prices (floor, market, prANA) |
 | `getPersonalAccountInfo(userPubkey)` | Get staking account info |
-| `getUserBalances(userPubkey)` | Get token balances |
+| `getUserBalances(userPubkey)` | Get wallet token balances (ANA, NIRV, USDC, prANA) |
+| `getClaimablePrana(userPubkey)` | Get claimable prANA amount via simulation |
+| `getClaimableRevshare(userPubkey)` | Get claimable ANA + NIRV revenue share |
 | `parseTransaction(signature)` | Parse a Nirvana transaction |
 | `buyAna(...)` | Buy ANA with USDC or NIRV |
 | `sellAna(...)` | Sell ANA for USDC or NIRV |
