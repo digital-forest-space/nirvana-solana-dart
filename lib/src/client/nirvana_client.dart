@@ -66,8 +66,14 @@ class NirvanaClient {
   /// Uses transaction-based price for ANA and on-chain calculation for floor
   Future<NirvanaPrices> fetchPrices() async {
     try {
-      final transactionPrice = await fetchLatestAnaPrice();
-      final floorPrice = await fetchFloorPrice();
+      // Fetch both prices in parallel
+      final results = await Future.wait([
+        fetchLatestAnaPrice(),
+        fetchFloorPrice(),
+      ]);
+
+      final transactionPrice = results[0] as TransactionPriceResult;
+      final floorPrice = results[1] as double;
 
       final ana = transactionPrice.price;
       final floor = floorPrice;
