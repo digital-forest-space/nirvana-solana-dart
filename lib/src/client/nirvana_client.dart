@@ -152,6 +152,9 @@ class NirvanaClient {
       int currentDelayMs = initialDelayMs;
       String? lastCheckedSig;
 
+      // Track the newest signature for checkpoint caching
+      final newestSig = signatures.first;
+
       while (txIndex < signatures.length && txChecked < pageSize) {
         final sig = signatures[txIndex];
         lastCheckedSig = sig;
@@ -167,6 +170,7 @@ class NirvanaClient {
           return TransactionPriceResult.found(
             price: result.price!,
             signature: sig,
+            newestCheckedSignature: newestSig,
             fee: result.fee,
             currency: result.currency,
           );
@@ -194,12 +198,15 @@ class NirvanaClient {
       // Checked all transactions in batch but didn't find buy/sell
       // If we hit the afterSignature naturally (exhausted newer signatures)
       if (txIndex >= signatures.length && afterSignature != null) {
-        return TransactionPriceResult.reachedAfterLimit(signature: lastCheckedSig);
+        return TransactionPriceResult.reachedAfterLimit();
       }
 
-      // Hit maxTxToCheck limit - app should page with signature
+      // Hit pageSize limit - app should page with signature
       if (lastCheckedSig != null) {
-        return TransactionPriceResult.limitReached(signature: lastCheckedSig);
+        return TransactionPriceResult.limitReached(
+          signature: lastCheckedSig,
+          newestCheckedSignature: newestSig,
+        );
       }
 
       return TransactionPriceResult.error('No recent ANA buy/sell transactions found');
@@ -266,6 +273,7 @@ class NirvanaClient {
   }) async {
     String? beforeSignature;
     String? lastSignature;
+    String? newestCheckedSig; // Track from first page for checkpoint
 
     for (var page = 1; page <= maxPages; page++) {
       final result = await fetchLatestAnaPrice(
@@ -276,6 +284,11 @@ class NirvanaClient {
         maxDelayMs: maxDelayMs,
         maxRetries: maxRetries,
       );
+
+      // Capture newest signature from first page
+      if (page == 1 && result.newestCheckedSignature != null) {
+        newestCheckedSig = result.newestCheckedSignature;
+      }
 
       // Return immediately for terminal states
       if (result.status != PriceResultStatus.limitReached) {
@@ -289,7 +302,10 @@ class NirvanaClient {
     }
 
     // Exhausted all pages without finding buy/sell
-    return TransactionPriceResult.limitReached(signature: lastSignature!);
+    return TransactionPriceResult.limitReached(
+      signature: lastSignature!,
+      newestCheckedSignature: newestCheckedSig!,
+    );
   }
 
   /// Parses a transaction to extract ANA price

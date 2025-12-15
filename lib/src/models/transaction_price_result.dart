@@ -27,11 +27,16 @@ class TransactionPriceResult extends Equatable {
   final double? price;
 
   /// Context-dependent signature:
-  /// - [found]: the buy/sell tx signature (for caching)
+  /// - [found]: the buy/sell tx signature (for price caching)
   /// - [limitReached]: the oldest checked signature (use as beforeSignature to page)
-  /// - [reachedAfterLimit]: the oldest checked signature (not useful)
+  /// - [reachedAfterLimit]: null (no new transactions)
   /// - [error]: null
   final String? signature;
+
+  /// The newest transaction signature that was checked (for checkpoint caching).
+  /// Use this as `afterSignature` on next fetch to skip already-parsed transactions.
+  /// Available for [found] and [limitReached] statuses.
+  final String? newestCheckedSignature;
 
   /// Fee paid in the transaction
   final double? fee;
@@ -48,6 +53,7 @@ class TransactionPriceResult extends Equatable {
   const TransactionPriceResult({
     this.price,
     this.signature,
+    this.newestCheckedSignature,
     this.fee,
     this.currency,
     required this.status,
@@ -58,12 +64,14 @@ class TransactionPriceResult extends Equatable {
   factory TransactionPriceResult.found({
     required double price,
     required String signature,
+    String? newestCheckedSignature,
     double? fee,
     String? currency,
   }) {
     return TransactionPriceResult(
       price: price,
       signature: signature,
+      newestCheckedSignature: newestCheckedSignature,
       fee: fee,
       currency: currency,
       status: PriceResultStatus.found,
@@ -71,18 +79,21 @@ class TransactionPriceResult extends Equatable {
   }
 
   /// Creates a result indicating we reached the afterSignature limit
-  factory TransactionPriceResult.reachedAfterLimit({String? signature}) {
-    return TransactionPriceResult(
+  factory TransactionPriceResult.reachedAfterLimit() {
+    return const TransactionPriceResult(
       status: PriceResultStatus.reachedAfterLimit,
-      signature: signature,
     );
   }
 
   /// Creates a result indicating we hit the batch limit without finding buy/sell
-  factory TransactionPriceResult.limitReached({required String signature}) {
+  factory TransactionPriceResult.limitReached({
+    required String signature,
+    required String newestCheckedSignature,
+  }) {
     return TransactionPriceResult(
       status: PriceResultStatus.limitReached,
       signature: signature,
+      newestCheckedSignature: newestCheckedSignature,
     );
   }
 
@@ -107,17 +118,17 @@ class TransactionPriceResult extends Equatable {
   bool get hasError => status == PriceResultStatus.error;
 
   @override
-  List<Object?> get props => [price, signature, fee, currency, status, errorMessage];
+  List<Object?> get props => [price, signature, newestCheckedSignature, fee, currency, status, errorMessage];
 
   @override
   String toString() {
     switch (status) {
       case PriceResultStatus.found:
-        return 'TransactionPriceResult.found(price: $price, signature: $signature, fee: $fee, currency: $currency)';
+        return 'TransactionPriceResult.found(price: $price, signature: $signature, newestChecked: $newestCheckedSignature)';
       case PriceResultStatus.reachedAfterLimit:
-        return 'TransactionPriceResult.reachedAfterLimit(signature: $signature)';
+        return 'TransactionPriceResult.reachedAfterLimit()';
       case PriceResultStatus.limitReached:
-        return 'TransactionPriceResult.limitReached(signature: $signature)';
+        return 'TransactionPriceResult.limitReached(signature: $signature, newestChecked: $newestCheckedSignature)';
       case PriceResultStatus.error:
         return 'TransactionPriceResult.error($errorMessage)';
     }

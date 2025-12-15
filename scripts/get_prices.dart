@@ -60,8 +60,9 @@ void main(List<String> args) async {
         cache = jsonDecode(cacheFileObj.readAsStringSync()) as Map<String, dynamic>;
         if (verbose) {
           print('Cache: loaded from $_cacheFile');
-          print('  cached signature: ${cache['signature']}');
-          print('  cached price: \$${cache['price']}');
+          print('  checkpoint: ${cache['newestCheckedSignature']}');
+          print('  price sig:  ${cache['signature']}');
+          print('  price: \$${cache['price']}');
         }
       } catch (e) {
         if (verbose) print('Cache: failed to load ($e)');
@@ -83,17 +84,20 @@ void main(List<String> args) async {
     // Fetch ANA price with pagination
     final anaStart = DateTime.now();
     double? anaPrice;
-    String? newCachedSignature;
+    String? newPriceSignature;
+    String? newCheckpointSignature;
     late TransactionPriceResult result;
 
-    // Start with afterSignature from cache (only fetch newer transactions)
-    final cachedSignature = cache?['signature'] as String?;
+    // Start with checkpoint from cache (only fetch newer transactions)
+    // Use newestCheckedSignature for checkpoint, NOT signature (which is the price tx)
+    final cachedCheckpoint = cache?['newestCheckedSignature'] as String?;
 
     if (verbose) {
       // Verbose mode: use single-page method with manual paging loop
       // This demonstrates progress reporting for apps that need it
-      String? afterSignature = cachedSignature;
+      String? afterSignature = cachedCheckpoint;
       String? beforeSignature;
+      String? firstPageNewestSig;
 
       for (var page = 1; page <= maxPages; page++) {
         stdout.write('  page $page/$maxPages: ');
@@ -103,6 +107,11 @@ void main(List<String> args) async {
           beforeSignature: beforeSignature,
           pageSize: pageSize,
         );
+
+        // Capture checkpoint from first page
+        if (page == 1 && result.newestCheckedSignature != null) {
+          firstPageNewestSig = result.newestCheckedSignature;
+        }
 
         print('${result.status.name}${result.signature != null ? ' (${result.signature!.substring(0, 8)}...)' : ''}');
 
@@ -115,12 +124,17 @@ void main(List<String> args) async {
         afterSignature = null; // Clear after first page
       }
 
+      // Use first page checkpoint for multi-page scenarios
+      if (firstPageNewestSig != null && result.status == PriceResultStatus.limitReached) {
+        newCheckpointSignature = firstPageNewestSig;
+      }
+
       final elapsed = DateTime.now().difference(anaStart).inMilliseconds;
       print('  fetchLatestAnaPrice: ${elapsed}ms');
     } else {
       // Non-verbose: use convenience method that handles paging internally
       result = await client.fetchLatestAnaPriceWithPaging(
-        afterSignature: cachedSignature,
+        afterSignature: cachedCheckpoint,
         maxPages: maxPages,
         pageSize: pageSize,
       );
@@ -128,24 +142,31 @@ void main(List<String> args) async {
 
     switch (result.status) {
       case PriceResultStatus.found:
+        // New buy/sell found - update both price and checkpoint
         anaPrice = result.price;
-        newCachedSignature = result.signature;
+        newPriceSignature = result.signature;
+        newCheckpointSignature = result.newestCheckedSignature;
         break;
 
       case PriceResultStatus.reachedAfterLimit:
         // No new transactions since cache - cached price is still current
+        // Keep cached checkpoint (no new txs to update it)
         if (cache != null && cache['price'] != null) {
           anaPrice = cache['price'] as double;
-          newCachedSignature = cache['signature'] as String?;
+          newPriceSignature = cache['signature'] as String?;
+          newCheckpointSignature = cache['newestCheckedSignature'] as String?;
           if (verbose) print('  -> no new transactions, cached price is current');
         }
         break;
 
       case PriceResultStatus.limitReached:
-        // Exhausted all pages - try cached price as fallback
+        // Exhausted all pages without finding buy/sell
+        // Update checkpoint (we checked these txs) but keep cached price
         if (cache != null && cache['price'] != null) {
           anaPrice = cache['price'] as double;
-          newCachedSignature = cache['signature'] as String?;
+          newPriceSignature = cache['signature'] as String?;
+          // Use new checkpoint if available, otherwise result's checkpoint
+          newCheckpointSignature ??= result.newestCheckedSignature;
           if (verbose) print('  -> exhausted $maxPages pages, using cached price');
         }
         break;
@@ -169,7 +190,8 @@ void main(List<String> args) async {
 
     // Save cache (full result object for debugging)
     final newCache = {
-      'signature': newCachedSignature,
+      'signature': newPriceSignature,
+      'newestCheckedSignature': newCheckpointSignature,
       'price': anaPrice,
       'floor': floor,
       'prana': prana,
