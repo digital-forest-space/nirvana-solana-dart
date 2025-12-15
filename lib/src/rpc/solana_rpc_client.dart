@@ -19,7 +19,14 @@ abstract class SolanaRpcClient {
   Future<String> getAssociatedTokenAddress(String owner, String mint);
 
   /// Get recent transaction signatures for an address
-  Future<List<String>> getSignaturesForAddress(String address, {int limit = 100});
+  /// [until] - Get signatures newer than this signature (exclusive)
+  /// [before] - Get signatures older than this signature (exclusive, for paging)
+  Future<List<String>> getSignaturesForAddress(
+    String address, {
+    int limit = 100,
+    String? until,
+    String? before,
+  });
 
   /// Get transaction details (returns jsonParsed format)
   Future<Map<String, dynamic>> getTransaction(String signature);
@@ -134,10 +141,17 @@ class DefaultSolanaRpcClient implements SolanaRpcClient {
   }
   
   @override
-  Future<List<String>> getSignaturesForAddress(String address, {int limit = 100}) async {
+  Future<List<String>> getSignaturesForAddress(
+    String address, {
+    int limit = 100,
+    String? until,
+    String? before,
+  }) async {
     final signatures = await _client.rpcClient.getSignaturesForAddress(
       address,
       limit: limit,
+      until: until,
+      before: before,
     );
 
     return signatures

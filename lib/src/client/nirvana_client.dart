@@ -75,7 +75,11 @@ class NirvanaClient {
       final transactionPrice = results[0] as TransactionPriceResult;
       final floorPrice = results[1] as double;
 
-      final ana = transactionPrice.price;
+      if (!transactionPrice.hasPrice) {
+        throw Exception('Failed to get ANA price: ${transactionPrice.status}');
+      }
+
+      final ana = transactionPrice.price!;
       final floor = floorPrice;
       final prana = ana - floor;
 
@@ -97,56 +101,195 @@ class NirvanaClient {
   }
 
   /// Fetches the latest ANA price from a recent buy/sell transaction
-  /// [maxTxToCheck] - Maximum number of transactions to check
-  /// [delayMs] - Delay between RPC calls in milliseconds to avoid rate limiting
-  /// [maxRetries] - Maximum retries per transaction on rate limit errors
+  ///
+  /// [afterSignature] - Only check signatures newer than this (exclusive).
+  ///   Use this with a cached signature to only check new transactions.
+  ///   If no new buy/sell found, returns [PriceResultStatus.reachedAfterLimit].
+  ///
+  /// [beforeSignature] - Only check signatures older than this (exclusive).
+  ///   Use this for paging when [PriceResultStatus.limitReached] is returned.
+  ///
+  /// [pageSize] - Signatures to fetch and transactions to check per page (default 20)
+  /// [initialDelayMs] - Initial delay between transaction fetches (default 500ms)
+  /// [maxDelayMs] - Maximum delay after backoff (default 10000ms)
+  /// [maxRetries] - Maximum retries per transaction on rate limit errors (default 5)
+  ///
+  /// Rate limiting: Uses exponential backoff starting at [initialDelayMs],
+  /// doubling on each 429 error up to [maxDelayMs]. Resets after success.
+  ///
+  /// Returns a [TransactionPriceResult] with:
+  /// - [PriceResultStatus.found] - Price found, use [price] and [signature]
+  /// - [PriceResultStatus.reachedAfterLimit] - Hit afterSignature, no new buy/sell (use cached)
+  /// - [PriceResultStatus.limitReached] - Checked pageSize txs, retry with [signature] as beforeSignature
+  /// - [PriceResultStatus.error] - Network/RPC error occurred
   Future<TransactionPriceResult> fetchLatestAnaPrice({
-    int maxTxToCheck = 20,
-    int delayMs = 2000,
-    int maxRetries = 3,
+    String? afterSignature,
+    String? beforeSignature,
+    int pageSize = 20,
+    int initialDelayMs = 500,
+    int maxDelayMs = 10000,
+    int maxRetries = 5,
   }) async {
     try {
       final signatures = await _rpcClient.getSignaturesForAddress(
         _config.programId,
-        limit: 100,
+        limit: pageSize,
+        until: afterSignature,
+        before: beforeSignature,
       );
+
+      // If no signatures returned and we had an afterSignature, we've reached it
+      if (signatures.isEmpty) {
+        if (afterSignature != null) {
+          return TransactionPriceResult.reachedAfterLimit();
+        }
+        return TransactionPriceResult.error('No transactions found for program');
+      }
 
       int txIndex = 0;
       int txChecked = 0;
       int retryCount = 0;
+      int currentDelayMs = initialDelayMs;
+      String? lastCheckedSig;
 
-      while (txIndex < signatures.length && txChecked < maxTxToCheck) {
+      while (txIndex < signatures.length && txChecked < pageSize) {
         final sig = signatures[txIndex];
+        lastCheckedSig = sig;
 
         try {
-          if (txChecked > 0 && delayMs > 0) {
-            await Future.delayed(Duration(milliseconds: delayMs));
+          // Small delay between calls (not on first call)
+          if (txChecked > 0 && currentDelayMs > 0) {
+            await Future.delayed(Duration(milliseconds: currentDelayMs));
           }
 
           final result = await _parseTransactionPrice(sig);
-          return result;
+          // Found a buy/sell transaction - return with signature for caching
+          return TransactionPriceResult.found(
+            price: result.price!,
+            signature: sig,
+            fee: result.fee,
+            currency: result.currency,
+          );
         } catch (e) {
           final errorMsg = e.toString();
 
-          // Handle rate limiting with retry
+          // Handle rate limiting with exponential backoff
           if (errorMsg.contains('429') && retryCount < maxRetries) {
             retryCount++;
-            await Future.delayed(const Duration(seconds: 10));
+            // Exponential backoff: double delay each retry, cap at maxDelayMs
+            currentDelayMs = (currentDelayMs * 2).clamp(initialDelayMs, maxDelayMs);
+            await Future.delayed(Duration(milliseconds: currentDelayMs));
             // Don't increment txIndex or txChecked - retry same transaction
             continue;
           }
 
-          // Reset retry count and move to next transaction
+          // Success path or non-429 error: reset backoff and move to next
           retryCount = 0;
+          currentDelayMs = initialDelayMs; // Reset delay on success
           txIndex++;
           txChecked++;
         }
       }
 
-      throw Exception('No recent ANA buy/sell transactions found');
+      // Checked all transactions in batch but didn't find buy/sell
+      // If we hit the afterSignature naturally (exhausted newer signatures)
+      if (txIndex >= signatures.length && afterSignature != null) {
+        return TransactionPriceResult.reachedAfterLimit(signature: lastCheckedSig);
+      }
+
+      // Hit maxTxToCheck limit - app should page with signature
+      if (lastCheckedSig != null) {
+        return TransactionPriceResult.limitReached(signature: lastCheckedSig);
+      }
+
+      return TransactionPriceResult.error('No recent ANA buy/sell transactions found');
     } catch (e) {
-      throw Exception('Failed to fetch latest ANA price: $e');
+      return TransactionPriceResult.error(e.toString());
     }
+  }
+
+  /// Fetches the latest ANA price with automatic paging.
+  ///
+  /// This is a convenience method that handles the paging loop internally.
+  /// For progress reporting or custom paging logic, use [fetchLatestAnaPrice] directly.
+  ///
+  /// [afterSignature] - Only check signatures newer than this (for caching)
+  /// [maxPages] - Maximum pages to check before giving up (default 10)
+  /// [pageSize] - Transactions to check per page (default 20)
+  /// [initialDelayMs] - Initial delay between fetches (default 500ms)
+  /// [maxDelayMs] - Maximum delay after backoff (default 10000ms)
+  /// [maxRetries] - Retries per transaction on rate limit (default 5)
+  ///
+  /// Returns [TransactionPriceResult] with:
+  /// - [PriceResultStatus.found] - Price found
+  /// - [PriceResultStatus.reachedAfterLimit] - No new txs since afterSignature
+  /// - [PriceResultStatus.limitReached] - Exhausted maxPages without finding buy/sell
+  /// - [PriceResultStatus.error] - Network/RPC error
+  ///
+  /// Example implementation (for custom progress reporting):
+  /// ```dart
+  /// Future<TransactionPriceResult> fetchWithProgress({
+  ///   String? cachedSignature,
+  ///   required void Function(int page, int maxPages) onProgress,
+  /// }) async {
+  ///   String? beforeSignature;
+  ///   const maxPages = 10;
+  ///
+  ///   for (var page = 1; page <= maxPages; page++) {
+  ///     onProgress(page, maxPages);
+  ///
+  ///     final result = await client.fetchLatestAnaPrice(
+  ///       afterSignature: cachedSignature,
+  ///       beforeSignature: beforeSignature,
+  ///       pageSize: 20,
+  ///     );
+  ///
+  ///     if (result.status != PriceResultStatus.limitReached) {
+  ///       return result;
+  ///     }
+  ///
+  ///     // Page deeper
+  ///     beforeSignature = result.signature;
+  ///     cachedSignature = null; // Clear after first page
+  ///   }
+  ///
+  ///   return TransactionPriceResult.limitReached(signature: beforeSignature!);
+  /// }
+  /// ```
+  Future<TransactionPriceResult> fetchLatestAnaPriceWithPaging({
+    String? afterSignature,
+    int maxPages = 10,
+    int pageSize = 20,
+    int initialDelayMs = 500,
+    int maxDelayMs = 10000,
+    int maxRetries = 5,
+  }) async {
+    String? beforeSignature;
+    String? lastSignature;
+
+    for (var page = 1; page <= maxPages; page++) {
+      final result = await fetchLatestAnaPrice(
+        afterSignature: afterSignature,
+        beforeSignature: beforeSignature,
+        pageSize: pageSize,
+        initialDelayMs: initialDelayMs,
+        maxDelayMs: maxDelayMs,
+        maxRetries: maxRetries,
+      );
+
+      // Return immediately for terminal states
+      if (result.status != PriceResultStatus.limitReached) {
+        return result;
+      }
+
+      // Need to page deeper
+      lastSignature = result.signature;
+      beforeSignature = result.signature;
+      afterSignature = null; // Clear after first page
+    }
+
+    // Exhausted all pages without finding buy/sell
+    return TransactionPriceResult.limitReached(signature: lastSignature!);
   }
 
   /// Parses a transaction to extract ANA price
@@ -354,9 +497,9 @@ class NirvanaClient {
       pricePerAna = paymentAmount / anaAmount;
     }
 
-    return TransactionPriceResult(
+    return TransactionPriceResult.found(
       price: pricePerAna,
-      transaction: signature,
+      signature: signature,
       fee: anaFee,
       currency: currency,
     );
