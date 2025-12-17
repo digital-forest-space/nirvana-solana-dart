@@ -902,6 +902,12 @@ class NirvanaClient {
     return await _accountResolver.getUserBalances(userPubkey);
   }
 
+  /// Resolve user's token account addresses (ATAs)
+  /// Returns addresses for ANA, NIRV, USDC, and prANA token accounts
+  Future<NirvanaUserAccounts> resolveUserAccounts(String userPubkey) async {
+    return await _accountResolver.resolveUserAccounts(userPubkey);
+  }
+
   /// Get claimable prANA amount via simulation
   ///
   /// Simulates the `stage_prana` instruction and reads the calculated
@@ -1585,38 +1591,12 @@ class NirvanaClient {
     double? minAnaAmount,
   }) async {
     try {
-      // Resolve user accounts
-      final accounts = await _accountResolver.resolveUserAccounts(userPubkey);
-
-      // Validate payment account
-      final paymentAccount = useNirv ? accounts.nirvAccount : accounts.usdcAccount;
-      if (paymentAccount == null) {
-        throw Exception('User does not have ${useNirv ? "NIRV" : "USDC"} token account');
-      }
-
-      // Ensure ANA and NIRV accounts exist
-      if (accounts.anaAccount == null) {
-        throw Exception('User does not have ANA token account');
-      }
-      if (accounts.nirvAccount == null) {
-        throw Exception('User does not have NIRV token account');
-      }
-
-      // Convert amount to lamports (6 decimals)
-      final amountLamports = (amount * 1000000).toInt();
-      final minAnaLamports = minAnaAmount != null
-          ? (minAnaAmount * 1000000).toInt()
-          : 0;
-
-      // Build buy instruction
-      final instruction = _transactionBuilder.buildBuyExact2Instruction(
+      // Build instruction using shared helper
+      final instruction = await _buildBuyAnaInstruction(
         userPubkey: userPubkey,
-        userPaymentAccount: paymentAccount,
-        userAnaAccount: accounts.anaAccount!,
-        userNirvAccount: accounts.nirvAccount!,
-        amountLamports: amountLamports,
+        amount: amount,
         useNirv: useNirv,
-        minAnaLamports: minAnaLamports,
+        minAnaAmount: minAnaAmount,
       );
 
       // Create and send transaction
@@ -1637,7 +1617,93 @@ class NirvanaClient {
       );
     }
   }
-  
+
+  /// Shared helper to build buy ANA instruction
+  Future<Instruction> _buildBuyAnaInstruction({
+    required String userPubkey,
+    required double amount,
+    required bool useNirv,
+    double? minAnaAmount,
+    NirvanaUserAccounts? userAccounts,
+  }) async {
+    // Use provided accounts or resolve via RPC
+    final accounts = userAccounts ?? await _accountResolver.resolveUserAccounts(userPubkey);
+
+    // Validate payment account
+    final paymentAccount = useNirv ? accounts.nirvAccount : accounts.usdcAccount;
+    if (paymentAccount == null) {
+      throw Exception('User does not have ${useNirv ? "NIRV" : "USDC"} token account');
+    }
+
+    // Ensure ANA and NIRV accounts exist
+    if (accounts.anaAccount == null) {
+      throw Exception('User does not have ANA token account');
+    }
+    if (accounts.nirvAccount == null) {
+      throw Exception('User does not have NIRV token account');
+    }
+
+    // Convert amount to lamports (6 decimals)
+    final amountLamports = (amount * 1000000).toInt();
+    final minAnaLamports = minAnaAmount != null
+        ? (minAnaAmount * 1000000).toInt()
+        : 0;
+
+    // Build buy instruction
+    return _transactionBuilder.buildBuyExact2Instruction(
+      userPubkey: userPubkey,
+      userPaymentAccount: paymentAccount,
+      userAnaAccount: accounts.anaAccount!,
+      userNirvAccount: accounts.nirvAccount!,
+      amountLamports: amountLamports,
+      useNirv: useNirv,
+      minAnaLamports: minAnaLamports,
+    );
+  }
+
+  /// Build unsigned buy ANA transaction bytes for MWA signing
+  /// Returns serialized transaction bytes ready for wallet signing
+  ///
+  /// If [userAccounts] is provided, it will be used instead of resolving via RPC.
+  /// This allows building transactions without RPC calls when ATAs are already known.
+  Future<Uint8List> buildUnsignedBuyAnaTransaction({
+    required String userPubkey,
+    required double amount,
+    required bool useNirv,
+    double? minAnaAmount,
+    NirvanaUserAccounts? userAccounts,
+  }) async {
+    // Build instruction using shared helper
+    final instruction = await _buildBuyAnaInstruction(
+      userPubkey: userPubkey,
+      amount: amount,
+      useNirv: useNirv,
+      minAnaAmount: minAnaAmount,
+      userAccounts: userAccounts,
+    );
+
+    // Get recent blockhash
+    final blockhash = await _rpcClient.getLatestBlockhash();
+
+    // Build and compile message
+    final message = Message(instructions: [instruction]);
+    final feePayer = Ed25519HDPublicKey.fromBase58(userPubkey);
+    final compiledMessage = message.compile(
+      recentBlockhash: blockhash,
+      feePayer: feePayer,
+    );
+
+    // Build unsigned transaction using SignedTx with placeholder signature
+    // This ensures the format matches what MWA wallets expect
+    final signature = Signature(List.filled(64, 0), publicKey: feePayer);
+    final signedTx = SignedTx(
+      compiledMessage: compiledMessage,
+      signatures: [signature],
+    );
+
+    return Uint8List.fromList(signedTx.toByteArray().toList());
+  }
+
   /// Sell ANA tokens for USDC or NIRV
   /// Set useNirv=true to receive NIRV instead of USDC
   Future<TransactionResult> sellAna({
