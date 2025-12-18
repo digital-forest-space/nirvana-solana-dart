@@ -1714,36 +1714,11 @@ class NirvanaClient {
     bool useNirv = false,
   }) async {
     try {
-      // Resolve user accounts
-      final accounts = await _accountResolver.resolveUserAccounts(userPubkey);
-
-      // Validate accounts
-      if (accounts.anaAccount == null) {
-        throw Exception('User does not have ANA token account');
-      }
-      if (useNirv && accounts.nirvAccount == null) {
-        throw Exception('User does not have NIRV token account');
-      }
-      if (!useNirv && accounts.usdcAccount == null) {
-        throw Exception('User does not have USDC token account');
-      }
-
-      // Convert amount to lamports (6 decimals)
-      final anaLamports = (anaAmount * 1000000).toInt();
-      final minOutputLamports = minOutputAmount != null
-          ? (minOutputAmount * 1000000).toInt()
-          : 0;
-
-      // Get destination account (NIRV or USDC)
-      final destinationAccount = useNirv ? accounts.nirvAccount! : accounts.usdcAccount!;
-
-      // Build sell instruction (sell2 - sells ANA for USDC or NIRV)
-      final instruction = _transactionBuilder.buildSellInstruction(
+      // Build instruction using shared helper
+      final instruction = await _buildSellAnaInstruction(
         userPubkey: userPubkey,
-        userAnaAccount: accounts.anaAccount!,
-        userDestinationAccount: destinationAccount,
-        anaLamports: anaLamports,
-        minOutputLamports: minOutputLamports,
+        anaAmount: anaAmount,
+        minOutputAmount: minOutputAmount,
         useNirv: useNirv,
       );
 
@@ -1765,7 +1740,161 @@ class NirvanaClient {
       );
     }
   }
-  
+
+  /// Shared helper to build sell ANA instruction
+  Future<Instruction> _buildSellAnaInstruction({
+    required String userPubkey,
+    required double anaAmount,
+    double? minOutputAmount,
+    bool useNirv = false,
+    NirvanaUserAccounts? userAccounts,
+  }) async {
+    // Use provided accounts or resolve via RPC
+    final accounts = userAccounts ?? await _accountResolver.resolveUserAccounts(userPubkey);
+
+    // Validate accounts
+    if (accounts.anaAccount == null) {
+      throw Exception('User does not have ANA token account');
+    }
+    if (useNirv && accounts.nirvAccount == null) {
+      throw Exception('User does not have NIRV token account');
+    }
+    if (!useNirv && accounts.usdcAccount == null) {
+      throw Exception('User does not have USDC token account');
+    }
+
+    // Convert amount to lamports (6 decimals)
+    final anaLamports = (anaAmount * 1000000).toInt();
+    final minOutputLamports = minOutputAmount != null
+        ? (minOutputAmount * 1000000).toInt()
+        : 0;
+
+    // Get destination account (NIRV or USDC)
+    final destinationAccount = useNirv ? accounts.nirvAccount! : accounts.usdcAccount!;
+
+    // Build sell instruction (sell2 - sells ANA for USDC or NIRV)
+    return _transactionBuilder.buildSellInstruction(
+      userPubkey: userPubkey,
+      userAnaAccount: accounts.anaAccount!,
+      userDestinationAccount: destinationAccount,
+      anaLamports: anaLamports,
+      minOutputLamports: minOutputLamports,
+      useNirv: useNirv,
+    );
+  }
+
+  /// Build unsigned sell ANA transaction bytes for MWA signing
+  /// Returns serialized transaction bytes ready for wallet signing
+  ///
+  /// If [userAccounts] is provided, it will be used instead of resolving via RPC.
+  /// This allows building transactions without RPC calls when ATAs are already known.
+  Future<Uint8List> buildUnsignedSellAnaTransaction({
+    required String userPubkey,
+    required double anaAmount,
+    double? minOutputAmount,
+    bool useNirv = false,
+    NirvanaUserAccounts? userAccounts,
+  }) async {
+    // Build instruction using shared helper
+    final instruction = await _buildSellAnaInstruction(
+      userPubkey: userPubkey,
+      anaAmount: anaAmount,
+      minOutputAmount: minOutputAmount,
+      useNirv: useNirv,
+      userAccounts: userAccounts,
+    );
+
+    // Get recent blockhash
+    final blockhash = await _rpcClient.getLatestBlockhash();
+
+    // Build and compile message
+    final message = Message(instructions: [instruction]);
+    final feePayer = Ed25519HDPublicKey.fromBase58(userPubkey);
+    final compiledMessage = message.compile(
+      recentBlockhash: blockhash,
+      feePayer: feePayer,
+    );
+
+    // Build unsigned transaction using SignedTx with placeholder signature
+    // This ensures the format matches what MWA wallets expect
+    final signature = Signature(List.filled(64, 0), publicKey: feePayer);
+    final signedTx = SignedTx(
+      compiledMessage: compiledMessage,
+      signatures: [signature],
+    );
+
+    return Uint8List.fromList(signedTx.toByteArray().toList());
+  }
+
+  /// Shared helper to build stake ANA instruction
+  Future<Instruction> _buildStakeAnaInstruction({
+    required String userPubkey,
+    required double anaAmount,
+    NirvanaUserAccounts? userAccounts,
+  }) async {
+    // Use provided accounts or resolve via RPC
+    final accounts = userAccounts ?? await _accountResolver.resolveUserAccounts(userPubkey);
+    if (accounts.anaAccount == null) {
+      throw Exception('User does not have ANA token account');
+    }
+
+    // Find personal account (required for staking)
+    final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
+    if (personalAccount == null) {
+      throw Exception('PersonalAccount not found. Initialize it first or stake via full stakeAna method.');
+    }
+
+    // Convert amount to lamports
+    final anaLamports = (anaAmount * 1000000).toInt();
+
+    // Build stake (deposit) instruction
+    return _transactionBuilder.buildDepositAnaInstruction(
+      userPubkey: userPubkey,
+      userAnaAccount: accounts.anaAccount!,
+      personalAccount: personalAccount,
+      anaLamports: anaLamports,
+    );
+  }
+
+  /// Build unsigned stake ANA transaction for MWA signing
+  ///
+  /// Returns serialized transaction bytes ready for wallet signing
+  ///
+  /// Note: Requires PersonalAccount to already exist. Use stakeAna() for
+  /// automatic PersonalAccount initialization.
+  Future<Uint8List> buildUnsignedStakeAnaTransaction({
+    required String userPubkey,
+    required double anaAmount,
+    NirvanaUserAccounts? userAccounts,
+  }) async {
+    // Build instruction using shared helper
+    final instruction = await _buildStakeAnaInstruction(
+      userPubkey: userPubkey,
+      anaAmount: anaAmount,
+      userAccounts: userAccounts,
+    );
+
+    // Get recent blockhash
+    final blockhash = await _rpcClient.getLatestBlockhash();
+
+    // Build and compile message
+    final message = Message(instructions: [instruction]);
+    final feePayer = Ed25519HDPublicKey.fromBase58(userPubkey);
+    final compiledMessage = message.compile(
+      recentBlockhash: blockhash,
+      feePayer: feePayer,
+    );
+
+    // Build unsigned transaction using SignedTx with placeholder signature
+    final signature = Signature(List.filled(64, 0), publicKey: feePayer);
+    final signedTx = SignedTx(
+      compiledMessage: compiledMessage,
+      signatures: [signature],
+    );
+
+    return Uint8List.fromList(signedTx.toByteArray().toList());
+  }
+
   /// Stake ANA tokens
   Future<TransactionResult> stakeAna({
     required String userPubkey,
