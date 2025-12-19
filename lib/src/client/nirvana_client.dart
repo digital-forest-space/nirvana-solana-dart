@@ -1971,6 +1971,72 @@ class NirvanaClient {
     return tempPersonalAccount;
   }
   
+  /// Shared helper to build borrow NIRV instruction
+  Future<Instruction> _buildBorrowNirvInstruction({
+    required String userPubkey,
+    required double nirvAmount,
+    NirvanaUserAccounts? userAccounts,
+  }) async {
+    // Find personal account
+    final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
+    if (personalAccount == null) {
+      throw Exception('PersonalAccount not found. You need to stake ANA first.');
+    }
+
+    // Use provided accounts or resolve via RPC
+    final accounts = userAccounts ?? await _accountResolver.resolveUserAccounts(userPubkey);
+    if (accounts.nirvAccount == null) {
+      throw Exception('User does not have NIRV token account');
+    }
+
+    // Convert amount to lamports
+    final nirvLamports = (nirvAmount * 1000000).toInt();
+
+    // Build borrow instruction
+    return _transactionBuilder.buildBorrowNirvInstruction(
+      userPubkey: userPubkey,
+      personalAccount: personalAccount,
+      userNirvAccount: accounts.nirvAccount!,
+      nirvLamports: nirvLamports,
+    );
+  }
+
+  /// Build unsigned borrow NIRV transaction for MWA signing
+  ///
+  /// Returns serialized transaction bytes ready for wallet signing
+  Future<Uint8List> buildUnsignedBorrowNirvTransaction({
+    required String userPubkey,
+    required double nirvAmount,
+    NirvanaUserAccounts? userAccounts,
+  }) async {
+    // Build instruction using shared helper
+    final instruction = await _buildBorrowNirvInstruction(
+      userPubkey: userPubkey,
+      nirvAmount: nirvAmount,
+      userAccounts: userAccounts,
+    );
+
+    // Get recent blockhash
+    final blockhash = await _rpcClient.getLatestBlockhash();
+
+    // Build and compile message
+    final message = Message(instructions: [instruction]);
+    final feePayer = Ed25519HDPublicKey.fromBase58(userPubkey);
+    final compiledMessage = message.compile(
+      recentBlockhash: blockhash,
+      feePayer: feePayer,
+    );
+
+    // Build unsigned transaction using SignedTx with placeholder signature
+    final signature = Signature(List.filled(64, 0), publicKey: feePayer);
+    final signedTx = SignedTx(
+      compiledMessage: compiledMessage,
+      signatures: [signature],
+    );
+
+    return Uint8List.fromList(signedTx.toByteArray().toList());
+  }
+
   /// Borrow NIRV against staked ANA
   Future<TransactionResult> borrowNirv({
     required String userPubkey,
@@ -1978,36 +2044,19 @@ class NirvanaClient {
     required double nirvAmount,
   }) async {
     try {
-      // Find personal account
-      final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
-      if (personalAccount == null) {
-        throw Exception('PersonalAccount not found. You need to stake ANA first.');
-      }
-      
-      // Resolve user accounts
-      final accounts = await _accountResolver.resolveUserAccounts(userPubkey);
-      if (accounts.nirvAccount == null) {
-        throw Exception('User does not have NIRV token account');
-      }
-      
-      // Convert amount to lamports
-      final nirvLamports = (nirvAmount * 1000000).toInt();
-      
-      // Build borrow instruction
-      final instruction = _transactionBuilder.buildBorrowNirvInstruction(
+      // Build instruction using shared helper
+      final instruction = await _buildBorrowNirvInstruction(
         userPubkey: userPubkey,
-        personalAccount: personalAccount,
-        userNirvAccount: accounts.nirvAccount!,
-        nirvLamports: nirvLamports,
+        nirvAmount: nirvAmount,
       );
-      
+
       // Create and send transaction
       final message = Message(instructions: [instruction]);
       final signature = await _rpcClient.sendAndConfirmTransaction(
         message: message,
         signers: [keypair],
       );
-      
+
       return TransactionResult.success(
         signature: signature,
         logs: ['Borrow NIRV transaction successful'],
@@ -2020,6 +2069,72 @@ class NirvanaClient {
     }
   }
   
+  /// Shared helper to build unstake ANA instruction
+  Future<Instruction> _buildUnstakeAnaInstruction({
+    required String userPubkey,
+    required double anaAmount,
+    NirvanaUserAccounts? userAccounts,
+  }) async {
+    // Use provided accounts or resolve via RPC
+    final accounts = userAccounts ?? await _accountResolver.resolveUserAccounts(userPubkey);
+    if (accounts.anaAccount == null) {
+      throw Exception('User does not have ANA token account');
+    }
+
+    // Find personal account (required for unstaking)
+    final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
+    if (personalAccount == null) {
+      throw Exception('PersonalAccount not found. You need to have staked tokens first.');
+    }
+
+    // Convert amount to lamports
+    final anaLamports = (anaAmount * 1000000).toInt();
+
+    // Build withdraw instruction
+    return _transactionBuilder.buildWithdrawAnaInstruction(
+      userPubkey: userPubkey,
+      userAnaAccount: accounts.anaAccount!,
+      personalAccount: personalAccount,
+      anaLamports: anaLamports,
+    );
+  }
+
+  /// Build unsigned unstake ANA transaction for MWA signing
+  ///
+  /// Returns serialized transaction bytes ready for wallet signing
+  Future<Uint8List> buildUnsignedUnstakeAnaTransaction({
+    required String userPubkey,
+    required double anaAmount,
+    NirvanaUserAccounts? userAccounts,
+  }) async {
+    // Build instruction using shared helper
+    final instruction = await _buildUnstakeAnaInstruction(
+      userPubkey: userPubkey,
+      anaAmount: anaAmount,
+      userAccounts: userAccounts,
+    );
+
+    // Get recent blockhash
+    final blockhash = await _rpcClient.getLatestBlockhash();
+
+    // Build and compile message
+    final message = Message(instructions: [instruction]);
+    final feePayer = Ed25519HDPublicKey.fromBase58(userPubkey);
+    final compiledMessage = message.compile(
+      recentBlockhash: blockhash,
+      feePayer: feePayer,
+    );
+
+    // Build unsigned transaction using SignedTx with placeholder signature
+    final signature = Signature(List.filled(64, 0), publicKey: feePayer);
+    final signedTx = SignedTx(
+      compiledMessage: compiledMessage,
+      signatures: [signature],
+    );
+
+    return Uint8List.fromList(signedTx.toByteArray().toList());
+  }
+
   /// Unstake (withdraw) ANA tokens from staking position
   Future<TransactionResult> unstakeAna({
     required String userPubkey,
@@ -2027,27 +2142,10 @@ class NirvanaClient {
     required double anaAmount,
   }) async {
     try {
-      // Find personal account (required for unstake)
-      final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
-      if (personalAccount == null) {
-        throw Exception('PersonalAccount not found. You need to have staked tokens first.');
-      }
-
-      // Resolve user accounts
-      final accounts = await _accountResolver.resolveUserAccounts(userPubkey);
-      if (accounts.anaAccount == null) {
-        throw Exception('User does not have ANA token account');
-      }
-
-      // Convert to lamports (ANA has 6 decimals)
-      final anaLamports = (anaAmount * 1000000).toInt();
-
-      // Build withdraw instruction
-      final instruction = _transactionBuilder.buildWithdrawAnaInstruction(
+      // Build instruction using shared helper
+      final instruction = await _buildUnstakeAnaInstruction(
         userPubkey: userPubkey,
-        userAnaAccount: accounts.anaAccount!,
-        personalAccount: personalAccount,
-        anaLamports: anaLamports,
+        anaAmount: anaAmount,
       );
 
       // Create and send transaction
@@ -2066,6 +2164,66 @@ class NirvanaClient {
     }
   }
   
+  /// Shared helper to build claim prANA instruction
+  Future<Instruction> _buildClaimPranaInstruction({
+    required String userPubkey,
+    NirvanaUserAccounts? userAccounts,
+  }) async {
+    // Find personal account
+    final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
+    if (personalAccount == null) {
+      throw Exception('User does not have a personal account (must stake first)');
+    }
+
+    // Use provided accounts or resolve via RPC
+    final accounts = userAccounts ?? await _accountResolver.resolveUserAccounts(userPubkey);
+    if (accounts.pranaAccount == null) {
+      throw Exception('User does not have prANA token account');
+    }
+
+    // Build claim instruction
+    return _transactionBuilder.buildClaimPranaInstruction(
+      userPubkey: userPubkey,
+      personalAccount: personalAccount,
+      userPranaAccount: accounts.pranaAccount!,
+    );
+  }
+
+  /// Build unsigned claim prANA transaction for MWA signing
+  ///
+  /// Returns serialized transaction bytes ready for wallet signing
+  /// Claims all available prANA - no amount parameter needed
+  Future<Uint8List> buildUnsignedClaimPranaTransaction({
+    required String userPubkey,
+    NirvanaUserAccounts? userAccounts,
+  }) async {
+    // Build instruction using shared helper
+    final instruction = await _buildClaimPranaInstruction(
+      userPubkey: userPubkey,
+      userAccounts: userAccounts,
+    );
+
+    // Get recent blockhash
+    final blockhash = await _rpcClient.getLatestBlockhash();
+
+    // Build and compile message
+    final message = Message(instructions: [instruction]);
+    final feePayer = Ed25519HDPublicKey.fromBase58(userPubkey);
+    final compiledMessage = message.compile(
+      recentBlockhash: blockhash,
+      feePayer: feePayer,
+    );
+
+    // Build unsigned transaction using SignedTx with placeholder signature
+    final signature = Signature(List.filled(64, 0), publicKey: feePayer);
+    final signedTx = SignedTx(
+      compiledMessage: compiledMessage,
+      signatures: [signature],
+    );
+
+    return Uint8List.fromList(signedTx.toByteArray().toList());
+  }
+
   /// Claim accumulated prANA rewards from staking
   /// Claims all available prANA - no amount parameter needed
   Future<TransactionResult> claimPrana({
@@ -2073,23 +2231,9 @@ class NirvanaClient {
     required Ed25519HDKeyPair keypair,
   }) async {
     try {
-      // Find personal account
-      final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
-      if (personalAccount == null) {
-        throw Exception('User does not have a personal account (must stake first)');
-      }
-
-      // Resolve user token accounts
-      final accounts = await _accountResolver.resolveUserAccounts(userPubkey);
-      if (accounts.pranaAccount == null) {
-        throw Exception('User does not have prANA token account');
-      }
-
-      // Build claim instruction
-      final instruction = _transactionBuilder.buildClaimPranaInstruction(
+      // Build instruction using shared helper
+      final instruction = await _buildClaimPranaInstruction(
         userPubkey: userPubkey,
-        personalAccount: personalAccount,
-        userPranaAccount: accounts.pranaAccount!,
       );
 
       // Create and send transaction
@@ -2111,6 +2255,70 @@ class NirvanaClient {
     }
   }
 
+  /// Shared helper to build claim revenue share instruction
+  Future<Instruction> _buildClaimRevshareInstruction({
+    required String userPubkey,
+    NirvanaUserAccounts? userAccounts,
+  }) async {
+    // Find personal account
+    final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
+    if (personalAccount == null) {
+      throw Exception('User does not have a personal account (must stake first)');
+    }
+
+    // Use provided accounts or resolve via RPC
+    final accounts = userAccounts ?? await _accountResolver.resolveUserAccounts(userPubkey);
+    if (accounts.anaAccount == null) {
+      throw Exception('User does not have ANA token account');
+    }
+    if (accounts.nirvAccount == null) {
+      throw Exception('User does not have NIRV token account');
+    }
+
+    // Build claim revenue share instruction
+    return _transactionBuilder.buildClaimRevenueShareInstruction(
+      userPubkey: userPubkey,
+      personalAccount: personalAccount,
+      userAnaAccount: accounts.anaAccount!,
+      userNirvAccount: accounts.nirvAccount!,
+    );
+  }
+
+  /// Build unsigned claim revenue share transaction for MWA signing
+  ///
+  /// Returns serialized transaction bytes ready for wallet signing
+  /// Claims all available revenue - no amount parameter needed
+  Future<Uint8List> buildUnsignedClaimRevshareTransaction({
+    required String userPubkey,
+    NirvanaUserAccounts? userAccounts,
+  }) async {
+    // Build instruction using shared helper
+    final instruction = await _buildClaimRevshareInstruction(
+      userPubkey: userPubkey,
+      userAccounts: userAccounts,
+    );
+
+    // Get recent blockhash
+    final blockhash = await _rpcClient.getLatestBlockhash();
+
+    // Build and compile message
+    final message = Message(instructions: [instruction]);
+    final feePayer = Ed25519HDPublicKey.fromBase58(userPubkey);
+    final compiledMessage = message.compile(
+      recentBlockhash: blockhash,
+      feePayer: feePayer,
+    );
+
+    // Build unsigned transaction using SignedTx with placeholder signature
+    final signature = Signature(List.filled(64, 0), publicKey: feePayer);
+    final signedTx = SignedTx(
+      compiledMessage: compiledMessage,
+      signatures: [signature],
+    );
+
+    return Uint8List.fromList(signedTx.toByteArray().toList());
+  }
+
   /// Claim accumulated revenue share (ANA + NIRV from protocol fees)
   /// Claims all available revenue - no amount parameter needed
   Future<TransactionResult> claimRevenueShare({
@@ -2118,27 +2326,9 @@ class NirvanaClient {
     required Ed25519HDKeyPair keypair,
   }) async {
     try {
-      // Find personal account
-      final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
-      if (personalAccount == null) {
-        throw Exception('User does not have a personal account (must stake first)');
-      }
-
-      // Resolve user token accounts
-      final accounts = await _accountResolver.resolveUserAccounts(userPubkey);
-      if (accounts.anaAccount == null) {
-        throw Exception('User does not have ANA token account');
-      }
-      if (accounts.nirvAccount == null) {
-        throw Exception('User does not have NIRV token account');
-      }
-
-      // Build claim revenue share instruction
-      final instruction = _transactionBuilder.buildClaimRevenueShareInstruction(
+      // Build instruction using shared helper
+      final instruction = await _buildClaimRevshareInstruction(
         userPubkey: userPubkey,
-        personalAccount: personalAccount,
-        userAnaAccount: accounts.anaAccount!,
-        userNirvAccount: accounts.nirvAccount!,
       );
 
       // Create and send transaction
@@ -2160,6 +2350,72 @@ class NirvanaClient {
     }
   }
 
+  /// Shared helper to build repay NIRV instruction
+  Future<Instruction> _buildRepayNirvInstruction({
+    required String userPubkey,
+    required double nirvAmount,
+    NirvanaUserAccounts? userAccounts,
+  }) async {
+    // Find personal account (required for repay)
+    final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
+    if (personalAccount == null) {
+      throw Exception('User does not have a personal account. Cannot repay without borrowed position.');
+    }
+
+    // Use provided accounts or resolve via RPC
+    final accounts = userAccounts ?? await _accountResolver.resolveUserAccounts(userPubkey);
+    if (accounts.nirvAccount == null) {
+      throw Exception('User does not have NIRV token account');
+    }
+
+    // Convert to lamports (NIRV has 6 decimals)
+    final nirvLamports = (nirvAmount * 1000000).toInt();
+
+    // Build repay instruction - burns NIRV to reduce debt
+    return _transactionBuilder.buildRepayInstruction(
+      userPubkey: userPubkey,
+      personalAccount: personalAccount,
+      userNirvAccount: accounts.nirvAccount!,
+      nirvLamports: nirvLamports,
+    );
+  }
+
+  /// Build unsigned repay NIRV transaction for MWA signing
+  ///
+  /// Returns serialized transaction bytes ready for wallet signing
+  Future<Uint8List> buildUnsignedRepayNirvTransaction({
+    required String userPubkey,
+    required double nirvAmount,
+    NirvanaUserAccounts? userAccounts,
+  }) async {
+    // Build instruction using shared helper
+    final instruction = await _buildRepayNirvInstruction(
+      userPubkey: userPubkey,
+      nirvAmount: nirvAmount,
+      userAccounts: userAccounts,
+    );
+
+    // Get recent blockhash
+    final blockhash = await _rpcClient.getLatestBlockhash();
+
+    // Build and compile message
+    final message = Message(instructions: [instruction]);
+    final feePayer = Ed25519HDPublicKey.fromBase58(userPubkey);
+    final compiledMessage = message.compile(
+      recentBlockhash: blockhash,
+      feePayer: feePayer,
+    );
+
+    // Build unsigned transaction using SignedTx with placeholder signature
+    final signature = Signature(List.filled(64, 0), publicKey: feePayer);
+    final signedTx = SignedTx(
+      compiledMessage: compiledMessage,
+      signatures: [signature],
+    );
+
+    return Uint8List.fromList(signedTx.toByteArray().toList());
+  }
+
   /// Repay NIRV debt by burning NIRV tokens
   /// The NIRV is burned to reduce outstanding NIRV debt on the personal account
   Future<TransactionResult> repayNirv({
@@ -2168,27 +2424,10 @@ class NirvanaClient {
     required double nirvAmount,
   }) async {
     try {
-      // Find personal account (required for repay)
-      final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
-      if (personalAccount == null) {
-        throw Exception('User does not have a personal account. Cannot repay without borrowed position.');
-      }
-
-      // Resolve user accounts
-      final accounts = await _accountResolver.resolveUserAccounts(userPubkey);
-      if (accounts.nirvAccount == null) {
-        throw Exception('User does not have NIRV token account');
-      }
-
-      // Convert to lamports (NIRV has 6 decimals)
-      final nirvLamports = (nirvAmount * 1000000).toInt();
-
-      // Build repay instruction - burns NIRV to reduce debt
-      final instruction = _transactionBuilder.buildRepayInstruction(
+      // Build instruction using shared helper
+      final instruction = await _buildRepayNirvInstruction(
         userPubkey: userPubkey,
-        personalAccount: personalAccount,
-        userNirvAccount: accounts.nirvAccount!,
-        nirvLamports: nirvLamports,
+        nirvAmount: nirvAmount,
       );
 
       // Create and send transaction
