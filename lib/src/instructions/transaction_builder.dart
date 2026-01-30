@@ -351,6 +351,64 @@ class NirvanaTransactionBuilder {
     );
   }
 
+  /// Build refresh price curve instruction (updates protocol price state)
+  /// Must be called before claim prANA to ensure accrued rewards are current.
+  /// Based on Chrome injection analysis of claim prANA transaction (instruction 2).
+  ///
+  /// Discriminator: [205, 200, 207, 206, 57, 131, 162, 126]
+  /// Data: 8-byte discriminator + 8-byte unix timestamp (seconds) + 1-byte flag
+  Instruction buildRefreshPriceCurveInstruction() {
+    final discriminator = [205, 200, 207, 206, 57, 131, 162, 126];
+
+    // Current unix timestamp in seconds
+    final now = DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000;
+    final timestampBytes = Uint8List(8);
+    timestampBytes.buffer.asByteData().setUint64(0, now, Endian.little);
+
+    final instructionData = [
+      ...discriminator,
+      ...timestampBytes,
+      1, // flag byte (always 1 in observed transactions)
+    ];
+
+    // 3 accounts: tenant, ANA mint, price curve
+    final accounts = [
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.tenantAccount), isSigner: false, isWriteable: true),  // 0: tenant
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.anaMint), isSigner: false, isWriteable: false),        // 1: ANA mint
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.priceCurve), isSigner: false, isWriteable: true),      // 2: price curve PDA
+    ];
+
+    return Instruction(
+      programId: Ed25519HDPublicKey.fromBase58(_config.programId),
+      accounts: accounts,
+      data: ByteArray(Uint8List.fromList(instructionData)),
+    );
+  }
+
+  /// Build refresh personal account instruction (syncs accrued prANA rewards)
+  /// Must be called after refresh price curve and before claim prANA.
+  /// Based on Chrome injection analysis of claim prANA transaction (instruction 4).
+  ///
+  /// Discriminator: [54, 112, 82, 14, 216, 131, 165, 126]
+  /// Data: 8-byte discriminator only (no parameters)
+  Instruction buildRefreshPersonalAccountInstruction({
+    required String personalAccount,
+  }) {
+    final discriminator = [54, 112, 82, 14, 216, 131, 165, 126];
+
+    // 2 accounts: tenant, personal account
+    final accounts = [
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.tenantAccount), isSigner: false, isWriteable: true),  // 0: tenant
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(personalAccount), isSigner: false, isWriteable: true),         // 1: personal account
+    ];
+
+    return Instruction(
+      programId: Ed25519HDPublicKey.fromBase58(_config.programId),
+      accounts: accounts,
+      data: ByteArray(Uint8List.fromList(discriminator)),
+    );
+  }
+
   /// Build claim prANA instruction (claims accumulated prANA rewards)
   /// Based on Chrome injection analysis of actual claim transactions
   Instruction buildClaimPranaInstruction({

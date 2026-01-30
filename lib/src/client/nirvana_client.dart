@@ -2164,8 +2164,13 @@ class NirvanaClient {
     }
   }
   
-  /// Shared helper to build claim prANA instruction
-  Future<Instruction> _buildClaimPranaInstruction({
+  /// Shared helper to build claim prANA instructions (refresh + claim)
+  ///
+  /// Returns three instructions that must be executed together:
+  /// 1. Refresh price curve (updates protocol price state)
+  /// 2. Refresh personal account (syncs accrued prANA)
+  /// 3. Claim prANA (transfers accrued prANA to user)
+  Future<List<Instruction>> _buildClaimPranaInstructions({
     required String userPubkey,
     NirvanaUserAccounts? userAccounts,
   }) async {
@@ -2181,24 +2186,35 @@ class NirvanaClient {
       throw Exception('User does not have prANA token account');
     }
 
-    // Build claim instruction
-    return _transactionBuilder.buildClaimPranaInstruction(
-      userPubkey: userPubkey,
-      personalAccount: personalAccount,
-      userPranaAccount: accounts.pranaAccount!,
-    );
+    return [
+      // 1. Refresh price curve
+      _transactionBuilder.buildRefreshPriceCurveInstruction(),
+      // 2. Refresh personal account
+      _transactionBuilder.buildRefreshPersonalAccountInstruction(
+        personalAccount: personalAccount,
+      ),
+      // 3. Claim prANA
+      _transactionBuilder.buildClaimPranaInstruction(
+        userPubkey: userPubkey,
+        personalAccount: personalAccount,
+        userPranaAccount: accounts.pranaAccount!,
+      ),
+    ];
   }
 
   /// Build unsigned claim prANA transaction for MWA signing
   ///
   /// Returns serialized transaction bytes ready for wallet signing
   /// Claims all available prANA - no amount parameter needed
+  ///
+  /// Includes refresh instructions (price curve + personal account) that
+  /// must precede the claim to ensure accrued rewards are up-to-date.
   Future<Uint8List> buildUnsignedClaimPranaTransaction({
     required String userPubkey,
     NirvanaUserAccounts? userAccounts,
   }) async {
-    // Build instruction using shared helper
-    final instruction = await _buildClaimPranaInstruction(
+    // Build all three instructions using shared helper
+    final instructions = await _buildClaimPranaInstructions(
       userPubkey: userPubkey,
       userAccounts: userAccounts,
     );
@@ -2207,7 +2223,7 @@ class NirvanaClient {
     final blockhash = await _rpcClient.getLatestBlockhash();
 
     // Build and compile message
-    final message = Message(instructions: [instruction]);
+    final message = Message(instructions: instructions);
     final feePayer = Ed25519HDPublicKey.fromBase58(userPubkey);
     final compiledMessage = message.compile(
       recentBlockhash: blockhash,
@@ -2226,18 +2242,21 @@ class NirvanaClient {
 
   /// Claim accumulated prANA rewards from staking
   /// Claims all available prANA - no amount parameter needed
+  ///
+  /// Includes refresh instructions (price curve + personal account) that
+  /// must precede the claim to ensure accrued rewards are up-to-date.
   Future<TransactionResult> claimPrana({
     required String userPubkey,
     required Ed25519HDKeyPair keypair,
   }) async {
     try {
-      // Build instruction using shared helper
-      final instruction = await _buildClaimPranaInstruction(
+      // Build all three instructions using shared helper
+      final instructions = await _buildClaimPranaInstructions(
         userPubkey: userPubkey,
       );
 
       // Create and send transaction
-      final message = Message(instructions: [instruction]);
+      final message = Message(instructions: instructions);
       final signature = await _rpcClient.sendAndConfirmTransaction(
         message: message,
         signers: [keypair],
