@@ -7,11 +7,16 @@ import 'package:nirvana_solana/src/rpc/solana_rpc_client.dart';
 
 /// Discover all Samsara navToken markets from on-chain data.
 ///
-/// Usage: dart scripts/samsara/discover_markets.dart [--verbose]
+/// Usage: dart scripts/samsara/discover_markets.dart [--verbose] [--health]
 ///
 /// Queries getProgramAccounts for all Mayflower Market accounts (304 bytes),
 /// then fetches each market's Market Metadata to extract mints and vaults,
 /// and resolves token names via Metaplex Token Metadata.
+///
+/// With --health, also fetches per-market health signals (extra RPC calls):
+///   - navSupply: total circulating supply of the nav token
+///   - baseVaultBalance: base token balance in the market vault
+///   - lastTxTime: unix timestamp of the most recent transaction
 ///
 /// Market Metadata layout (488 bytes, discovered from navSOL reference):
 ///   offset   8: baseMint (32 bytes)
@@ -32,6 +37,7 @@ void main(List<String> args) async {
   final rpcUrl = Platform.environment['SOLANA_RPC_URL'] ??
       'https://api.mainnet-beta.solana.com';
   final verbose = args.contains('--verbose');
+  final health = args.contains('--health');
 
   final uri = Uri.parse(rpcUrl);
   final wsUrl = Uri.parse(rpcUrl.replaceFirst('https', 'wss'));
@@ -111,6 +117,20 @@ void main(List<String> args) async {
     }
   }
 
+  // Health signals: nav supply, vault balance, transaction recency
+  if (health) {
+    if (verbose) print('Fetching health signals for ${results.length} markets...\n');
+    for (final m in results) {
+      await _fetchHealthSignals(m, rpcClient, uri, verbose);
+    }
+  } else {
+    for (final m in results) {
+      m['navSupply'] = null;
+      m['baseVaultBalance'] = null;
+      m['lastTxTime'] = null;
+    }
+  }
+
   // Sort by floor price descending (most active/valuable first)
   results.sort((a, b) =>
       (b['floorPrice'] as double).compareTo(a['floorPrice'] as double));
@@ -135,12 +155,111 @@ void main(List<String> args) async {
       print('  Base Vault:       ${m['baseVault']}');
       print('  Nav Vault:        ${m['navVault']}');
       print('  Fee Vault:        ${m['feeVault']}');
+      if (health) {
+        final supply = m['navSupply'];
+        final vaultBal = m['baseVaultBalance'];
+        final lastTx = m['lastTxTime'] as int?;
+        print('  Nav Supply:       ${supply != null ? supply.toStringAsFixed(4) : 'n/a'}');
+        print('  Vault Balance:    ${vaultBal != null ? vaultBal.toStringAsFixed(8) : 'n/a'}');
+        if (lastTx != null) {
+          final age = DateTime.now().difference(
+              DateTime.fromMillisecondsSinceEpoch(lastTx * 1000));
+          print('  Last Tx:          ${_formatAge(age)} ago');
+        } else {
+          print('  Last Tx:          n/a');
+        }
+      }
       print('');
     }
   }
 
   print(jsonEncode(results));
   exit(0);
+}
+
+String _formatAge(Duration d) {
+  if (d.inDays > 0) return '${d.inDays}d ${d.inHours % 24}h';
+  if (d.inHours > 0) return '${d.inHours}h ${d.inMinutes % 60}m';
+  return '${d.inMinutes}m';
+}
+
+/// Fetches health signals for a single market: nav supply, vault balance,
+/// and most recent transaction timestamp.
+Future<void> _fetchHealthSignals(
+  Map<String, dynamic> market,
+  SolanaRpcClient rpcClient,
+  Uri rpcUrl,
+  bool verbose,
+) async {
+  final navMint = market['navMint'] as String;
+  final baseVault = market['baseVault'] as String;
+  final mayflowerMarket = market['mayflowerMarket'] as String;
+
+  // Nav token supply
+  await Future.delayed(const Duration(milliseconds: 400));
+  try {
+    final supplyResult = await _rpcCall(rpcUrl, 'getTokenSupply', [navMint]);
+    final uiStr = supplyResult?['value']?['uiAmountString'] as String?;
+    market['navSupply'] = uiStr != null ? double.parse(uiStr) : null;
+  } catch (_) {
+    market['navSupply'] = null;
+  }
+
+  // Base vault balance
+  await Future.delayed(const Duration(milliseconds: 400));
+  try {
+    market['baseVaultBalance'] = await rpcClient.getTokenBalance(baseVault);
+  } catch (_) {
+    market['baseVaultBalance'] = null;
+  }
+
+  // Most recent transaction timestamp
+  await Future.delayed(const Duration(milliseconds: 400));
+  try {
+    final sigsResult = await _rpcCall(rpcUrl, 'getSignaturesForAddress', [
+      mayflowerMarket,
+      {'limit': 1},
+    ]);
+    final sigs = sigsResult as List?;
+    if (sigs != null && sigs.isNotEmpty) {
+      market['lastTxTime'] = sigs[0]['blockTime'] as int?;
+    } else {
+      market['lastTxTime'] = null;
+    }
+  } catch (_) {
+    market['lastTxTime'] = null;
+  }
+
+  if (verbose) {
+    final label = market['navSymbol'] ?? market['navMint'];
+    print('  $label: supply=${market['navSupply']}, '
+        'vault=${market['baseVaultBalance']}, '
+        'lastTx=${market['lastTxTime']}');
+  }
+}
+
+/// Makes a raw JSON-RPC call to the Solana RPC endpoint.
+Future<dynamic> _rpcCall(Uri rpcUrl, String method, List<dynamic> params) async {
+  final httpClient = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+  try {
+    final request = await httpClient.postUrl(rpcUrl);
+    request.headers.contentType = ContentType.json;
+    request.write(jsonEncode({
+      'jsonrpc': '2.0',
+      'id': 1,
+      'method': method,
+      'params': params,
+    }));
+    final response = await request.close().timeout(const Duration(seconds: 15));
+    final body = await response.transform(utf8.decoder).join();
+    final data = jsonDecode(body) as Map<String, dynamic>;
+    if (data.containsKey('error')) {
+      throw Exception('RPC error: ${data['error']}');
+    }
+    return data['result'];
+  } finally {
+    httpClient.close();
+  }
 }
 
 /// Resolves Metaplex Token Metadata for a list of mint addresses.
