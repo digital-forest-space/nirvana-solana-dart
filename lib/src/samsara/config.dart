@@ -137,4 +137,41 @@ class NavTokenMarket {
       navDecimals: 8, // Assumed same as base
     );
   }
+
+  /// navETH market configuration (WETH → navETH)
+  factory NavTokenMarket.navEth() {
+    return const NavTokenMarket(
+      name: 'navETH',
+      baseName: 'WETH',
+      baseMint: '7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs',
+      navMint: 'navEgA7saxpNqKcnJcWbCeCFMhSQtN8hQWQkK4h9scH',
+      samsaraMarket: '', // TODO: Discover from interception
+      mayflowerMarket: '3AwyQgXuhQAFzMaw17V42EW2htwZknr11grEGddvZEUh',
+      marketMetadata: 'XAJvRwx5PmCgCYjsKMSoSrL6MZXJtWC6dwgndFvE1uu',
+      marketGroup: '72ECyHwnmmRCMrm2BuTKVgLdPSKHhDx5sNGFDYDwN8ym',
+      lookupTable: '', // TODO: Discover from interception
+      marketSolVault: 'FpENWfyotJxhAFSsowsSERaEbWMrSopHBAgyGamrvg1a',
+      marketNavVault: '6GAADZA83t5Uzk6fwZ55zisfGJ7TFPbnWTRxfLYDF6JM',
+      feeVault: '8XQi1aojXMgU4FEfvZmtytQjLAzi7Qyx3theFdCwhfhb',
+      authorityPda: '', // TODO: Discover from interception
+      baseDecimals: 8, // WETH has 8 decimals
+      navDecimals: 8, // Assumed same as base
+    );
+  }
+
+  /// All known navToken markets, keyed by lowercase name.
+  static final Map<String, NavTokenMarket> all = {
+    'navsol': NavTokenMarket.navSol(),
+    'navzec': NavTokenMarket.navZec(),
+    'navcbbtc': NavTokenMarket.navCbBtc(),
+    'naveth': NavTokenMarket.navEth(),
+  };
+
+  /// Looks up a market by name (case-insensitive).
+  /// Returns null if not found.
+  static NavTokenMarket? byName(String name) => all[name.toLowerCase()];
+
+  /// Returns all available market keys.
+  static List<String> get availableMarkets =>
+      all.values.map((m) => m.name).toList();
 }

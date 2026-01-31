@@ -6,32 +6,58 @@ import 'package:nirvana_solana/src/samsara/samsara_client.dart';
 import 'package:nirvana_solana/src/models/transaction_price_result.dart';
 import 'package:nirvana_solana/src/rpc/solana_rpc_client.dart';
 
-/// Fetch the latest navSOL price and floor price
+/// Fetch the latest navToken price and floor price for any Samsara market.
 ///
-/// Usage: dart scripts/samsara/fetch_nav_sol_price.dart [--rpc <url>] [--verbose]
+/// Usage: dart scripts/samsara/fetch_nav_price.dart --market <name> [--rpc <url>] [--verbose]
+///
+/// Without --market, lists available market names and exits.
 ///
 /// Environment:
 ///   SOLANA_RPC_URL - RPC endpoint (default: https://api.mainnet-beta.solana.com)
 
 void main(List<String> args) async {
-  // Parse args
   String? rpcUrl;
+  String? marketName;
   bool verbose = false;
+
   for (var i = 0; i < args.length; i++) {
     if (args[i] == '--rpc' && i + 1 < args.length) {
       rpcUrl = args[i + 1];
+      i++;
+    } else if (args[i] == '--market' && i + 1 < args.length) {
+      marketName = args[i + 1];
       i++;
     } else if (args[i] == '--verbose') {
       verbose = true;
     }
   }
 
+  // No market specified: list available markets and exit
+  if (marketName == null) {
+    print('Available markets:');
+    for (final name in NavTokenMarket.availableMarkets) {
+      print('  $name');
+    }
+    print('\nUsage: dart scripts/samsara/fetch_nav_price.dart --market <name> [--verbose]');
+    exit(0);
+  }
+
+  final market = NavTokenMarket.byName(marketName);
+  if (market == null) {
+    stderr.writeln('Unknown market: $marketName');
+    stderr.writeln('Available markets: ${NavTokenMarket.availableMarkets.join(', ')}');
+    exit(1);
+  }
+
   rpcUrl ??= Platform.environment['SOLANA_RPC_URL'] ??
       'https://api.mainnet-beta.solana.com';
 
   if (verbose) {
-    print('Fetching navSOL prices...');
+    print('Fetching ${market.name} prices...');
     print('RPC: $rpcUrl');
+    print('');
+    print('Market: ${market.name}');
+    print('Querying signatures for market: ${market.mayflowerMarket}');
     print('');
   }
 
@@ -45,13 +71,6 @@ void main(List<String> args) async {
   final rpcClient = DefaultSolanaRpcClient(solanaClient, rpcUrl: uri);
 
   final client = SamsaraClient(rpcClient: rpcClient);
-  final market = NavTokenMarket.navSol();
-
-  if (verbose) {
-    print('Market: ${market.name}');
-    print('Querying signatures for market: ${market.mayflowerMarket}');
-    print('');
-  }
 
   // Fetch market price and floor price in parallel
   final results = await Future.wait([
@@ -67,9 +86,10 @@ void main(List<String> args) async {
   final floorPrice = results[1] as double;
 
   if (verbose) {
-    print('Floor price: ${floorPrice.toStringAsFixed(6)} ${market.baseName}');
+    final decimals = market.baseDecimals > 6 ? 8 : 6;
+    print('Floor price: ${floorPrice.toStringAsFixed(decimals)} ${market.baseName}');
     if (priceResult.hasPrice) {
-      print('Market price: ${priceResult.price!.toStringAsFixed(6)} ${market.baseName}');
+      print('Market price: ${priceResult.price!.toStringAsFixed(decimals)} ${market.baseName}');
       print('Transaction: ${priceResult.signature}');
     } else if (priceResult.hasError) {
       print('Market price error: ${priceResult.errorMessage}');
