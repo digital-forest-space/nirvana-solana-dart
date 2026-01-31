@@ -12,23 +12,11 @@ import '../models/nirvana_transaction.dart';
 import '../rpc/solana_rpc_client.dart';
 import '../instructions/transaction_builder.dart';
 import '../accounts/account_resolver.dart';
+import '../discriminators.dart';
 import '../utils/retry.dart';
 
 /// Main client for interacting with Nirvana V2 protocol
 class NirvanaClient {
-  static const List<int> _tenantDiscriminator = [61, 43, 215, 51, 232, 242, 209, 170];
-
-  // Instruction discriminators for transaction type identification
-  static const List<int> _buyExact2Discriminator = [109, 5, 199, 243, 164, 233, 19, 152];
-  static const List<int> _sell2Discriminator = [47, 191, 120, 1, 28, 35, 253, 79];
-  static const List<int> _depositAnaDiscriminator = [68, 100, 197, 87, 22, 85, 190, 78];
-  static const List<int> _withdrawAnaDiscriminator = [93, 87, 203, 252, 78, 187, 97, 82];
-  static const List<int> _borrowNirvDiscriminator = [155, 1, 43, 62, 79, 104, 66, 42];
-  static const List<int> _repayDiscriminator = [28, 158, 130, 191, 125, 127, 195, 94];
-  static const List<int> _realizeDiscriminator = [64, 34, 113, 17, 141, 79, 61, 38];
-  static const List<int> _claimPranaDiscriminator = [47, 124, 203, 241, 4, 53, 226, 166];
-  static const List<int> _claimRevenueShareDiscriminator = [69, 140, 105, 250, 40, 226, 233, 116];
-
   final SolanaRpcClient _rpcClient;
   final NirvanaTransactionBuilder _transactionBuilder;
   final NirvanaAccountResolver _accountResolver;
@@ -664,7 +652,7 @@ class NirvanaClient {
     if (bytes.length < 8) return false;
 
     for (int i = 0; i < 8; i++) {
-      if (bytes[i] != _tenantDiscriminator[i]) {
+      if (bytes[i] != NirvanaDiscriminators.tenant[i]) {
         return false;
       }
     }
@@ -932,9 +920,8 @@ class NirvanaClient {
       return 0.0;
     }
 
-    // Build stage_prana instruction
-    // discriminator: [54, 112, 82, 14, 216, 131, 165, 126]
-    final discriminator = Uint8List.fromList([54, 112, 82, 14, 216, 131, 165, 126]);
+    // Build stage_prana instruction (refresh_personal_account)
+    final discriminator = Uint8List.fromList(NirvanaDiscriminators.refreshPersonalAccount);
 
     final instruction = Instruction(
       programId: Ed25519HDPublicKey.fromBase58(_config.programId),
@@ -1058,8 +1045,7 @@ class NirvanaClient {
     }
 
     // Build stage_rev_prana instruction
-    // discriminator: [66, 99, 75, 75, 81, 176, 254, 169]
-    final discriminator = Uint8List.fromList([66, 99, 75, 75, 81, 176, 254, 169]);
+    final discriminator = Uint8List.fromList(NirvanaDiscriminators.stageRevPrana);
 
     final instruction = Instruction(
       programId: Ed25519HDPublicKey.fromBase58(_config.programId),
@@ -1379,31 +1365,31 @@ class NirvanaClient {
   }
 
   NirvanaTransactionType _identifyTransactionType(List<int> discriminator) {
-    if (_listEquals(discriminator, _buyExact2Discriminator)) {
+    if (_listEquals(discriminator, NirvanaDiscriminators.buyExact2)) {
       return NirvanaTransactionType.buy;
     }
-    if (_listEquals(discriminator, _sell2Discriminator)) {
+    if (_listEquals(discriminator, NirvanaDiscriminators.sell2)) {
       return NirvanaTransactionType.sell;
     }
-    if (_listEquals(discriminator, _depositAnaDiscriminator)) {
+    if (_listEquals(discriminator, NirvanaDiscriminators.depositAna)) {
       return NirvanaTransactionType.stake;
     }
-    if (_listEquals(discriminator, _withdrawAnaDiscriminator)) {
+    if (_listEquals(discriminator, NirvanaDiscriminators.withdrawAna)) {
       return NirvanaTransactionType.unstake;
     }
-    if (_listEquals(discriminator, _borrowNirvDiscriminator)) {
+    if (_listEquals(discriminator, NirvanaDiscriminators.borrowNirv)) {
       return NirvanaTransactionType.borrow;
     }
-    if (_listEquals(discriminator, _repayDiscriminator)) {
+    if (_listEquals(discriminator, NirvanaDiscriminators.repay)) {
       return NirvanaTransactionType.repay;
     }
-    if (_listEquals(discriminator, _realizeDiscriminator)) {
+    if (_listEquals(discriminator, NirvanaDiscriminators.realize)) {
       return NirvanaTransactionType.realize;
     }
-    if (_listEquals(discriminator, _claimPranaDiscriminator)) {
+    if (_listEquals(discriminator, NirvanaDiscriminators.claimPrana)) {
       return NirvanaTransactionType.claimPrana;
     }
-    if (_listEquals(discriminator, _claimRevenueShareDiscriminator)) {
+    if (_listEquals(discriminator, NirvanaDiscriminators.claimRevenueShare)) {
       return NirvanaTransactionType.claimRevenueShare;
     }
     return NirvanaTransactionType.unknown;

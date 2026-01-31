@@ -46,6 +46,14 @@ class NirvanaDiscriminators {
   /// `claim_revenue_share` — Claim accumulated ANA + NIRV revenue.
   static const List<int> claimRevenueShare = [69, 140, 105, 250, 40, 226, 233, 116];
 
+  /// `stage_rev_prana` — Stage revenue prANA for claiming.
+  static const List<int> stageRevPrana = [66, 99, 75, 75, 81, 176, 254, 169];
+
+  // ── Nirvana V2 account discriminators ────────────────────────────────
+
+  /// Tenant account discriminator — identifies Nirvana tenant accounts.
+  static const List<int> tenant = [61, 43, 215, 51, 232, 242, 209, 170];
+
   // ── Samsara / Mayflower protocol ─────────────────────────────────────
 
   /// `init_personal_position` — Create navToken personal position PDA.
@@ -68,6 +76,7 @@ class NirvanaDiscriminators {
     'refresh_personal_account': refreshPersonalAccount,
     'claim_prana': claimPrana,
     'claim_revenue_share': claimRevenueShare,
+    'stage_rev_prana': stageRevPrana,
   };
 
   /// All Samsara / Mayflower discriminators keyed by instruction name.
