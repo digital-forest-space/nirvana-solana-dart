@@ -229,11 +229,12 @@ class SamsaraClient {
 
   /// Parses a Mayflower transaction to extract navToken price.
   ///
-  /// For buy: price = SOL spent / navToken received
-  /// For sell: price = SOL received / navToken spent
+  /// For buy: price = base spent / navToken received
+  /// For sell: price = base received / navToken spent
   ///
-  /// Uses pre/post token balances for navToken and native SOL balances
-  /// for the base asset (since SOL is wrapped/unwrapped in the transaction).
+  /// navToken amount is determined by net balance change (works because
+  /// navTokens are minted/burned). Base token amount uses the vault's
+  /// balance change, which works for both native-SOL and non-native markets.
   Future<TransactionPriceResult> _parseNavTokenTransactionPrice(
     String signature,
     NavTokenMarket market,
@@ -249,42 +250,29 @@ class SamsaraClient {
       throw Exception('Transaction failed');
     }
 
-    // Get pre/post token balances for navToken amount
     final preTokenBalances = meta['preTokenBalances'] as List? ?? [];
     final postTokenBalances = meta['postTokenBalances'] as List? ?? [];
 
-    // Find navToken balance change across all accounts
+    // navToken: net change across all accounts (non-zero because mint/burn)
     final navChange =
-        _getTokenBalanceChange(preTokenBalances, postTokenBalances, market.navMint);
+        _getTokenBalanceChangeByOwner(preTokenBalances, postTokenBalances, market.navMint, null);
 
-    // Find base token balance change
-    // For SOL-based markets, use the wSOL balance changes from token balances
-    // For non-SOL markets, use the base token balance changes directly
-    final baseChange = _getTokenBalanceChange(
-        preTokenBalances, postTokenBalances, market.baseMint);
+    // Base token: use the vault's change.
+    // For non-native tokens (cbBTC, ZEC), the net change across ALL accounts
+    // is zero (tokens just move between accounts). We must look at the vault
+    // specifically. The vault's owner is the market metadata PDA.
+    final baseChange = _getTokenBalanceChangeByOwner(
+        preTokenBalances, postTokenBalances, market.baseMint,
+        market.marketMetadata);
 
     if (navChange == 0.0 || baseChange == 0.0) {
       throw Exception('Not a ${market.name} buy/sell transaction');
     }
 
-    // Buy: user gains navToken (positive), loses base (negative in vault terms)
-    // Sell: user loses navToken (negative), gains base (positive in vault terms)
-    //
-    // We look at vault changes:
-    // - Market base vault gains base on buy, loses on sell
-    // - Market nav vault loses nav on buy, gains on sell
-    //
-    // But it's easier to look at total supply/balance changes:
-    // The navToken change and base change should be opposite signs from
-    // the user's perspective, but we're looking at ALL accounts.
-    //
-    // Simpler: price = abs(base change) / abs(nav change)
+    // price = abs(base vault change) / abs(nav change)
+    // Buy: vault gains base, nav minted → both positive
+    // Sell: vault loses base, nav burned → both negative
     final price = baseChange.abs() / navChange.abs();
-
-    // Determine direction from nav mint change
-    // If total navToken supply increased → buy (nav minted)
-    // If total navToken supply decreased → sell (nav burned)
-    final isBuy = navChange > 0;
 
     return TransactionPriceResult.found(
       price: price,
@@ -293,25 +281,24 @@ class SamsaraClient {
     );
   }
 
-  /// Calculates the total balance change for a specific mint across all accounts.
+  /// Gets the balance change for a specific mint filtered by token account owner.
   ///
-  /// Returns the NET change (sum of all account changes for this mint).
-  /// For a buy transaction:
-  ///   - wSOL: negative (user's wSOL consumed) + positive (vault receives)
-  ///     → but user's ATA is created/closed, so the vault change dominates
-  ///   - navSOL: positive (minted to user)
-  double _getTokenBalanceChange(
+  /// Used for base tokens where the net change across all accounts is zero
+  /// (e.g., cbBTC). By filtering to the vault owner (market metadata PDA),
+  /// we get the actual base amount involved in the trade.
+  double _getTokenBalanceChangeByOwner(
     List<dynamic> preTokenBalances,
     List<dynamic> postTokenBalances,
     String mint,
+    String? owner,
   ) {
-    // Build maps of accountIndex → uiAmount for pre and post
     final preAmounts = <int, double>{};
     final postAmounts = <int, double>{};
     final allIndices = <int>{};
 
     for (final balance in preTokenBalances) {
       if (balance['mint'] != mint) continue;
+      if (owner != null && balance['owner'] != owner) continue;
       final index = balance['accountIndex'] as int;
       final amount = double.parse(
           balance['uiTokenAmount']?['uiAmountString'] ?? '0');
@@ -321,6 +308,7 @@ class SamsaraClient {
 
     for (final balance in postTokenBalances) {
       if (balance['mint'] != mint) continue;
+      if (owner != null && balance['owner'] != owner) continue;
       final index = balance['accountIndex'] as int;
       final amount = double.parse(
           balance['uiTokenAmount']?['uiAmountString'] ?? '0');
@@ -328,7 +316,6 @@ class SamsaraClient {
       allIndices.add(index);
     }
 
-    // Sum up all changes for this mint
     double totalChange = 0.0;
     for (final index in allIndices) {
       final pre = preAmounts[index] ?? 0.0;

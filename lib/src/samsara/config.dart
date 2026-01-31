@@ -106,13 +106,34 @@ class NavTokenMarket {
       samsaraMarket: '9JiASAyMBL9riFDPJtWCEtK4E2rr2Yfpqxoynxa3XemE',
       mayflowerMarket: '9SBSQvx5B8tKRgtYa3tyXeyvL3JMAZiA2JVXWzDnFKig',
       marketMetadata: 'HcGpdC8EtNpZPComvRaXDQtGHLpCFXMqfzRYeRSPCT5L',
-      marketGroup: '', // TODO: Discover from interception
+      marketGroup: 'BfGgpGGyMFfZDYyXqjyPU4YG6Py5kkD93mUGXT7TxGnf',
       lookupTable: '', // TODO: Discover from interception
-      marketSolVault: '', // TODO: Discover from interception
-      marketNavVault: '', // TODO: Discover from interception
-      feeVault: '', // TODO: Discover from interception
+      marketSolVault: 'GreFb71nqhudTo5iYBUa8Czgb9ACCUuTDYpm98XdLUwk',
+      marketNavVault: 'CfE1xoGPJSmppr9N7ysTGq3tca5Xc22RbsbZycir1tVq',
+      feeVault: 'GPpY9M9XraDsbGBpTqtnoQJugktgMDBjGM6UxdQoD3UM',
       authorityPda: '', // TODO: Discover from interception
       baseDecimals: 8, // ZEC typically has 8 decimals
+      navDecimals: 8, // Assumed same as base
+    );
+  }
+
+  /// navCBBTC market configuration (cbBTC → navCBBTC)
+  factory NavTokenMarket.navCbBtc() {
+    return const NavTokenMarket(
+      name: 'navCBBTC',
+      baseName: 'cbBTC',
+      baseMint: 'cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij',
+      navMint: 'navB4nQ2ENP18CCo1Jqw9bbLncLBC389Rf3XRCQ6zau',
+      samsaraMarket: '', // TODO: Discover from interception
+      mayflowerMarket: '3WNH5EArcmVDJzi4KtaX75WiSY65mqT735GEEvqnFJ6B',
+      marketMetadata: 'rQL153FrAAcepv1exoemsf9WEsC2uJaajBaaWCykvnK',
+      marketGroup: 'AXJJT2A7pUAzFKaRWzGgSN9fr9sEvKdGiqbJjdyYQbqj',
+      lookupTable: '', // TODO: Discover from interception
+      marketSolVault: 'DH1tmXZ2sDe24o4JA6KPELt8G9nk8PfZHP6zfvAxZivM',
+      marketNavVault: '2kfQBRonDGXQfo1WkohTbTq55k6RcuYsfEDzXBozvR5X',
+      feeVault: 'JCbzDUCn5aLiE6rvvvy5hZoYv3cJzkYFmr35A4SZxzyW',
+      authorityPda: '', // TODO: Discover from interception
+      baseDecimals: 8, // cbBTC has 8 decimals
       navDecimals: 8, // Assumed same as base
     );
   }
