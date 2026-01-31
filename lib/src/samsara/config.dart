@@ -42,6 +42,7 @@ class SamsaraConfig {
 /// Configuration for a specific navToken market
 class NavTokenMarket {
   final String name;
+  final String baseName; // e.g., 'SOL', 'cbBTC'
   final String baseMint; // e.g., Native SOL
   final String navMint; // e.g., navSOL
   final String samsaraMarket;
@@ -58,6 +59,7 @@ class NavTokenMarket {
 
   const NavTokenMarket({
     required this.name,
+    required this.baseName,
     required this.baseMint,
     required this.navMint,
     required this.samsaraMarket,
@@ -77,6 +79,7 @@ class NavTokenMarket {
   factory NavTokenMarket.navSol() {
     return const NavTokenMarket(
       name: 'navSOL',
+      baseName: 'SOL',
       baseMint: 'So11111111111111111111111111111111111111112', // Native SOL (wSOL)
       navMint: 'navSnrYJkCxMiyhM3F7K889X1u8JFLVHHLxiyo6Jjqo',
       samsaraMarket: '4KnomWX4ga9qmDdQN9GctJKjEnwLQTNWWHs57MyYtmYc',
@@ -97,6 +100,7 @@ class NavTokenMarket {
   factory NavTokenMarket.navZec() {
     return const NavTokenMarket(
       name: 'navZEC',
+      baseName: 'ZEC',
       baseMint: 'A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS',
       navMint: 'navZyeDnqgHBJQjHX8Kk7ZEzwFgDXxVJBcsAXd76gVe',
       samsaraMarket: '9JiASAyMBL9riFDPJtWCEtK4E2rr2Yfpqxoynxa3XemE',

@@ -908,6 +908,17 @@ class NirvanaClient {
     return await _accountResolver.resolveUserAccounts(userPubkey);
   }
 
+  /// Find user's personal account address (for staking/borrowing/claiming)
+  /// Returns null if the user has never staked
+  Future<String?> findPersonalAccount(String userPubkey) async {
+    return await _accountResolver.findPersonalAccount(userPubkey);
+  }
+
+  /// Get a recent blockhash for transaction construction
+  Future<String> getLatestBlockhash() async {
+    return await _rpcClient.getLatestBlockhash();
+  }
+
   /// Get claimable prANA amount via simulation
   ///
   /// Simulates the `stage_prana` instruction and reads the calculated
@@ -1591,12 +1602,13 @@ class NirvanaClient {
     double? minAnaAmount,
   }) async {
     try {
-      // Build instruction using shared helper
-      final instruction = await _buildBuyAnaInstruction(
+      final accounts = await _accountResolver.resolveUserAccounts(userPubkey);
+      final instruction = _buildBuyAnaInstruction(
         userPubkey: userPubkey,
         amount: amount,
         useNirv: useNirv,
         minAnaAmount: minAnaAmount,
+        userAccounts: accounts,
       );
 
       // Create and send transaction
@@ -1619,15 +1631,16 @@ class NirvanaClient {
   }
 
   /// Shared helper to build buy ANA instruction
-  Future<Instruction> _buildBuyAnaInstruction({
+  ///
+  /// All account data must be resolved by the caller before invoking this method.
+  Instruction _buildBuyAnaInstruction({
     required String userPubkey,
     required double amount,
     required bool useNirv,
     double? minAnaAmount,
-    NirvanaUserAccounts? userAccounts,
-  }) async {
-    // Use provided accounts or resolve via RPC
-    final accounts = userAccounts ?? await _accountResolver.resolveUserAccounts(userPubkey);
+    required NirvanaUserAccounts userAccounts,
+  }) {
+    final accounts = userAccounts;
 
     // Validate payment account
     final paymentAccount = useNirv ? accounts.nirvAccount : accounts.usdcAccount;
@@ -1671,10 +1684,11 @@ class NirvanaClient {
     required double amount,
     required bool useNirv,
     double? minAnaAmount,
-    NirvanaUserAccounts? userAccounts,
+    required NirvanaUserAccounts userAccounts,
+    required String recentBlockhash,
   }) async {
     // Build instruction using shared helper
-    final instruction = await _buildBuyAnaInstruction(
+    final instruction = _buildBuyAnaInstruction(
       userPubkey: userPubkey,
       amount: amount,
       useNirv: useNirv,
@@ -1682,8 +1696,7 @@ class NirvanaClient {
       userAccounts: userAccounts,
     );
 
-    // Get recent blockhash
-    final blockhash = await _rpcClient.getLatestBlockhash();
+    final blockhash = recentBlockhash;
 
     // Build and compile message
     final message = Message(instructions: [instruction]);
@@ -1714,12 +1727,13 @@ class NirvanaClient {
     bool useNirv = false,
   }) async {
     try {
-      // Build instruction using shared helper
-      final instruction = await _buildSellAnaInstruction(
+      final accounts = await _accountResolver.resolveUserAccounts(userPubkey);
+      final instruction = _buildSellAnaInstruction(
         userPubkey: userPubkey,
         anaAmount: anaAmount,
         minOutputAmount: minOutputAmount,
         useNirv: useNirv,
+        userAccounts: accounts,
       );
 
       // Create and send transaction
@@ -1742,15 +1756,16 @@ class NirvanaClient {
   }
 
   /// Shared helper to build sell ANA instruction
-  Future<Instruction> _buildSellAnaInstruction({
+  ///
+  /// All account data must be resolved by the caller before invoking this method.
+  Instruction _buildSellAnaInstruction({
     required String userPubkey,
     required double anaAmount,
     double? minOutputAmount,
     bool useNirv = false,
-    NirvanaUserAccounts? userAccounts,
-  }) async {
-    // Use provided accounts or resolve via RPC
-    final accounts = userAccounts ?? await _accountResolver.resolveUserAccounts(userPubkey);
+    required NirvanaUserAccounts userAccounts,
+  }) {
+    final accounts = userAccounts;
 
     // Validate accounts
     if (accounts.anaAccount == null) {
@@ -1793,10 +1808,10 @@ class NirvanaClient {
     required double anaAmount,
     double? minOutputAmount,
     bool useNirv = false,
-    NirvanaUserAccounts? userAccounts,
+    required NirvanaUserAccounts userAccounts,
+    required String recentBlockhash,
   }) async {
-    // Build instruction using shared helper
-    final instruction = await _buildSellAnaInstruction(
+    final instruction = _buildSellAnaInstruction(
       userPubkey: userPubkey,
       anaAmount: anaAmount,
       minOutputAmount: minOutputAmount,
@@ -1804,8 +1819,7 @@ class NirvanaClient {
       userAccounts: userAccounts,
     );
 
-    // Get recent blockhash
-    final blockhash = await _rpcClient.getLatestBlockhash();
+    final blockhash = recentBlockhash;
 
     // Build and compile message
     final message = Message(instructions: [instruction]);
@@ -1827,21 +1841,16 @@ class NirvanaClient {
   }
 
   /// Shared helper to build stake ANA instruction
-  Future<Instruction> _buildStakeAnaInstruction({
+  ///
+  /// All account data must be resolved by the caller before invoking this method.
+  Instruction _buildStakeAnaInstruction({
     required String userPubkey,
     required double anaAmount,
-    NirvanaUserAccounts? userAccounts,
-  }) async {
-    // Use provided accounts or resolve via RPC
-    final accounts = userAccounts ?? await _accountResolver.resolveUserAccounts(userPubkey);
-    if (accounts.anaAccount == null) {
+    required NirvanaUserAccounts userAccounts,
+    required String personalAccount,
+  }) {
+    if (userAccounts.anaAccount == null) {
       throw Exception('User does not have ANA token account');
-    }
-
-    // Find personal account (required for staking)
-    final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
-    if (personalAccount == null) {
-      throw Exception('PersonalAccount not found. Initialize it first or stake via full stakeAna method.');
     }
 
     // Convert amount to lamports
@@ -1850,7 +1859,7 @@ class NirvanaClient {
     // Build stake (deposit) instruction
     return _transactionBuilder.buildDepositAnaInstruction(
       userPubkey: userPubkey,
-      userAnaAccount: accounts.anaAccount!,
+      userAnaAccount: userAccounts.anaAccount!,
       personalAccount: personalAccount,
       anaLamports: anaLamports,
     );
@@ -1865,17 +1874,18 @@ class NirvanaClient {
   Future<Uint8List> buildUnsignedStakeAnaTransaction({
     required String userPubkey,
     required double anaAmount,
-    NirvanaUserAccounts? userAccounts,
+    required NirvanaUserAccounts userAccounts,
+    required String personalAccount,
+    required String recentBlockhash,
   }) async {
-    // Build instruction using shared helper
-    final instruction = await _buildStakeAnaInstruction(
+    final instruction = _buildStakeAnaInstruction(
       userPubkey: userPubkey,
       anaAmount: anaAmount,
       userAccounts: userAccounts,
+      personalAccount: personalAccount,
     );
 
-    // Get recent blockhash
-    final blockhash = await _rpcClient.getLatestBlockhash();
+    final blockhash = recentBlockhash;
 
     // Build and compile message
     final message = Message(instructions: [instruction]);
@@ -1912,21 +1922,12 @@ class NirvanaClient {
         );
       }
 
-      // Resolve user accounts
       final accounts = await _accountResolver.resolveUserAccounts(userPubkey);
-      if (accounts.anaAccount == null) {
-        throw Exception('User does not have ANA token account');
-      }
-
-      // Convert amount to lamports
-      final anaLamports = (anaAmount * 1000000).toInt();
-
-      // Build stake instruction
-      final instruction = _transactionBuilder.buildDepositAnaInstruction(
+      final instruction = _buildStakeAnaInstruction(
         userPubkey: userPubkey,
-        userAnaAccount: accounts.anaAccount!,
+        anaAmount: anaAmount,
+        userAccounts: accounts,
         personalAccount: personalAccount,
-        anaLamports: anaLamports,
       );
 
       // Create and send transaction
@@ -1972,20 +1973,15 @@ class NirvanaClient {
   }
   
   /// Shared helper to build borrow NIRV instruction
-  Future<Instruction> _buildBorrowNirvInstruction({
+  ///
+  /// All account data must be resolved by the caller before invoking this method.
+  Instruction _buildBorrowNirvInstruction({
     required String userPubkey,
     required double nirvAmount,
-    NirvanaUserAccounts? userAccounts,
-  }) async {
-    // Find personal account
-    final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
-    if (personalAccount == null) {
-      throw Exception('PersonalAccount not found. You need to stake ANA first.');
-    }
-
-    // Use provided accounts or resolve via RPC
-    final accounts = userAccounts ?? await _accountResolver.resolveUserAccounts(userPubkey);
-    if (accounts.nirvAccount == null) {
+    required NirvanaUserAccounts userAccounts,
+    required String personalAccount,
+  }) {
+    if (userAccounts.nirvAccount == null) {
       throw Exception('User does not have NIRV token account');
     }
 
@@ -1996,7 +1992,7 @@ class NirvanaClient {
     return _transactionBuilder.buildBorrowNirvInstruction(
       userPubkey: userPubkey,
       personalAccount: personalAccount,
-      userNirvAccount: accounts.nirvAccount!,
+      userNirvAccount: userAccounts.nirvAccount!,
       nirvLamports: nirvLamports,
     );
   }
@@ -2007,17 +2003,18 @@ class NirvanaClient {
   Future<Uint8List> buildUnsignedBorrowNirvTransaction({
     required String userPubkey,
     required double nirvAmount,
-    NirvanaUserAccounts? userAccounts,
+    required NirvanaUserAccounts userAccounts,
+    required String personalAccount,
+    required String recentBlockhash,
   }) async {
-    // Build instruction using shared helper
-    final instruction = await _buildBorrowNirvInstruction(
+    final instruction = _buildBorrowNirvInstruction(
       userPubkey: userPubkey,
       nirvAmount: nirvAmount,
       userAccounts: userAccounts,
+      personalAccount: personalAccount,
     );
 
-    // Get recent blockhash
-    final blockhash = await _rpcClient.getLatestBlockhash();
+    final blockhash = recentBlockhash;
 
     // Build and compile message
     final message = Message(instructions: [instruction]);
@@ -2044,10 +2041,16 @@ class NirvanaClient {
     required double nirvAmount,
   }) async {
     try {
-      // Build instruction using shared helper
-      final instruction = await _buildBorrowNirvInstruction(
+      final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
+      if (personalAccount == null) {
+        throw Exception('PersonalAccount not found. You need to stake ANA first.');
+      }
+      final accounts = await _accountResolver.resolveUserAccounts(userPubkey);
+      final instruction = _buildBorrowNirvInstruction(
         userPubkey: userPubkey,
         nirvAmount: nirvAmount,
+        userAccounts: accounts,
+        personalAccount: personalAccount,
       );
 
       // Create and send transaction
@@ -2070,21 +2073,16 @@ class NirvanaClient {
   }
   
   /// Shared helper to build unstake ANA instruction
-  Future<Instruction> _buildUnstakeAnaInstruction({
+  ///
+  /// All account data must be resolved by the caller before invoking this method.
+  Instruction _buildUnstakeAnaInstruction({
     required String userPubkey,
     required double anaAmount,
-    NirvanaUserAccounts? userAccounts,
-  }) async {
-    // Use provided accounts or resolve via RPC
-    final accounts = userAccounts ?? await _accountResolver.resolveUserAccounts(userPubkey);
-    if (accounts.anaAccount == null) {
+    required NirvanaUserAccounts userAccounts,
+    required String personalAccount,
+  }) {
+    if (userAccounts.anaAccount == null) {
       throw Exception('User does not have ANA token account');
-    }
-
-    // Find personal account (required for unstaking)
-    final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
-    if (personalAccount == null) {
-      throw Exception('PersonalAccount not found. You need to have staked tokens first.');
     }
 
     // Convert amount to lamports
@@ -2093,7 +2091,7 @@ class NirvanaClient {
     // Build withdraw instruction
     return _transactionBuilder.buildWithdrawAnaInstruction(
       userPubkey: userPubkey,
-      userAnaAccount: accounts.anaAccount!,
+      userAnaAccount: userAccounts.anaAccount!,
       personalAccount: personalAccount,
       anaLamports: anaLamports,
     );
@@ -2105,17 +2103,18 @@ class NirvanaClient {
   Future<Uint8List> buildUnsignedUnstakeAnaTransaction({
     required String userPubkey,
     required double anaAmount,
-    NirvanaUserAccounts? userAccounts,
+    required NirvanaUserAccounts userAccounts,
+    required String personalAccount,
+    required String recentBlockhash,
   }) async {
-    // Build instruction using shared helper
-    final instruction = await _buildUnstakeAnaInstruction(
+    final instruction = _buildUnstakeAnaInstruction(
       userPubkey: userPubkey,
       anaAmount: anaAmount,
       userAccounts: userAccounts,
+      personalAccount: personalAccount,
     );
 
-    // Get recent blockhash
-    final blockhash = await _rpcClient.getLatestBlockhash();
+    final blockhash = recentBlockhash;
 
     // Build and compile message
     final message = Message(instructions: [instruction]);
@@ -2142,10 +2141,16 @@ class NirvanaClient {
     required double anaAmount,
   }) async {
     try {
-      // Build instruction using shared helper
-      final instruction = await _buildUnstakeAnaInstruction(
+      final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
+      if (personalAccount == null) {
+        throw Exception('PersonalAccount not found. You need to have staked tokens first.');
+      }
+      final accounts = await _accountResolver.resolveUserAccounts(userPubkey);
+      final instruction = _buildUnstakeAnaInstruction(
         userPubkey: userPubkey,
         anaAmount: anaAmount,
+        userAccounts: accounts,
+        personalAccount: personalAccount,
       );
 
       // Create and send transaction
@@ -2170,19 +2175,14 @@ class NirvanaClient {
   /// 1. Refresh price curve (updates protocol price state)
   /// 2. Refresh personal account (syncs accrued prANA)
   /// 3. Claim prANA (transfers accrued prANA to user)
-  Future<List<Instruction>> _buildClaimPranaInstructions({
+  ///
+  /// All account data must be resolved by the caller before invoking this method.
+  List<Instruction> _buildClaimPranaInstructions({
     required String userPubkey,
-    NirvanaUserAccounts? userAccounts,
-  }) async {
-    // Find personal account
-    final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
-    if (personalAccount == null) {
-      throw Exception('User does not have a personal account (must stake first)');
-    }
-
-    // Use provided accounts or resolve via RPC
-    final accounts = userAccounts ?? await _accountResolver.resolveUserAccounts(userPubkey);
-    if (accounts.pranaAccount == null) {
+    required NirvanaUserAccounts userAccounts,
+    required String personalAccount,
+  }) {
+    if (userAccounts.pranaAccount == null) {
       throw Exception('User does not have prANA token account');
     }
 
@@ -2197,7 +2197,7 @@ class NirvanaClient {
       _transactionBuilder.buildClaimPranaInstruction(
         userPubkey: userPubkey,
         personalAccount: personalAccount,
-        userPranaAccount: accounts.pranaAccount!,
+        userPranaAccount: userAccounts.pranaAccount!,
       ),
     ];
   }
@@ -2211,16 +2211,17 @@ class NirvanaClient {
   /// must precede the claim to ensure accrued rewards are up-to-date.
   Future<Uint8List> buildUnsignedClaimPranaTransaction({
     required String userPubkey,
-    NirvanaUserAccounts? userAccounts,
+    required NirvanaUserAccounts userAccounts,
+    required String personalAccount,
+    required String recentBlockhash,
   }) async {
-    // Build all three instructions using shared helper
-    final instructions = await _buildClaimPranaInstructions(
+    final instructions = _buildClaimPranaInstructions(
       userPubkey: userPubkey,
       userAccounts: userAccounts,
+      personalAccount: personalAccount,
     );
 
-    // Get recent blockhash
-    final blockhash = await _rpcClient.getLatestBlockhash();
+    final blockhash = recentBlockhash;
 
     // Build and compile message
     final message = Message(instructions: instructions);
@@ -2250,9 +2251,15 @@ class NirvanaClient {
     required Ed25519HDKeyPair keypair,
   }) async {
     try {
-      // Build all three instructions using shared helper
-      final instructions = await _buildClaimPranaInstructions(
+      final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
+      if (personalAccount == null) {
+        throw Exception('User does not have a personal account (must stake first)');
+      }
+      final accounts = await _accountResolver.resolveUserAccounts(userPubkey);
+      final instructions = _buildClaimPranaInstructions(
         userPubkey: userPubkey,
+        userAccounts: accounts,
+        personalAccount: personalAccount,
       );
 
       // Create and send transaction
@@ -2275,22 +2282,17 @@ class NirvanaClient {
   }
 
   /// Shared helper to build claim revenue share instruction
-  Future<Instruction> _buildClaimRevshareInstruction({
+  ///
+  /// All account data must be resolved by the caller before invoking this method.
+  Instruction _buildClaimRevshareInstruction({
     required String userPubkey,
-    NirvanaUserAccounts? userAccounts,
-  }) async {
-    // Find personal account
-    final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
-    if (personalAccount == null) {
-      throw Exception('User does not have a personal account (must stake first)');
-    }
-
-    // Use provided accounts or resolve via RPC
-    final accounts = userAccounts ?? await _accountResolver.resolveUserAccounts(userPubkey);
-    if (accounts.anaAccount == null) {
+    required NirvanaUserAccounts userAccounts,
+    required String personalAccount,
+  }) {
+    if (userAccounts.anaAccount == null) {
       throw Exception('User does not have ANA token account');
     }
-    if (accounts.nirvAccount == null) {
+    if (userAccounts.nirvAccount == null) {
       throw Exception('User does not have NIRV token account');
     }
 
@@ -2298,8 +2300,8 @@ class NirvanaClient {
     return _transactionBuilder.buildClaimRevenueShareInstruction(
       userPubkey: userPubkey,
       personalAccount: personalAccount,
-      userAnaAccount: accounts.anaAccount!,
-      userNirvAccount: accounts.nirvAccount!,
+      userAnaAccount: userAccounts.anaAccount!,
+      userNirvAccount: userAccounts.nirvAccount!,
     );
   }
 
@@ -2309,16 +2311,17 @@ class NirvanaClient {
   /// Claims all available revenue - no amount parameter needed
   Future<Uint8List> buildUnsignedClaimRevshareTransaction({
     required String userPubkey,
-    NirvanaUserAccounts? userAccounts,
+    required NirvanaUserAccounts userAccounts,
+    required String personalAccount,
+    required String recentBlockhash,
   }) async {
-    // Build instruction using shared helper
-    final instruction = await _buildClaimRevshareInstruction(
+    final instruction = _buildClaimRevshareInstruction(
       userPubkey: userPubkey,
       userAccounts: userAccounts,
+      personalAccount: personalAccount,
     );
 
-    // Get recent blockhash
-    final blockhash = await _rpcClient.getLatestBlockhash();
+    final blockhash = recentBlockhash;
 
     // Build and compile message
     final message = Message(instructions: [instruction]);
@@ -2345,9 +2348,15 @@ class NirvanaClient {
     required Ed25519HDKeyPair keypair,
   }) async {
     try {
-      // Build instruction using shared helper
-      final instruction = await _buildClaimRevshareInstruction(
+      final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
+      if (personalAccount == null) {
+        throw Exception('User does not have a personal account (must stake first)');
+      }
+      final accounts = await _accountResolver.resolveUserAccounts(userPubkey);
+      final instruction = _buildClaimRevshareInstruction(
         userPubkey: userPubkey,
+        userAccounts: accounts,
+        personalAccount: personalAccount,
       );
 
       // Create and send transaction
@@ -2370,20 +2379,15 @@ class NirvanaClient {
   }
 
   /// Shared helper to build repay NIRV instruction
-  Future<Instruction> _buildRepayNirvInstruction({
+  ///
+  /// All account data must be resolved by the caller before invoking this method.
+  Instruction _buildRepayNirvInstruction({
     required String userPubkey,
     required double nirvAmount,
-    NirvanaUserAccounts? userAccounts,
-  }) async {
-    // Find personal account (required for repay)
-    final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
-    if (personalAccount == null) {
-      throw Exception('User does not have a personal account. Cannot repay without borrowed position.');
-    }
-
-    // Use provided accounts or resolve via RPC
-    final accounts = userAccounts ?? await _accountResolver.resolveUserAccounts(userPubkey);
-    if (accounts.nirvAccount == null) {
+    required NirvanaUserAccounts userAccounts,
+    required String personalAccount,
+  }) {
+    if (userAccounts.nirvAccount == null) {
       throw Exception('User does not have NIRV token account');
     }
 
@@ -2394,7 +2398,7 @@ class NirvanaClient {
     return _transactionBuilder.buildRepayInstruction(
       userPubkey: userPubkey,
       personalAccount: personalAccount,
-      userNirvAccount: accounts.nirvAccount!,
+      userNirvAccount: userAccounts.nirvAccount!,
       nirvLamports: nirvLamports,
     );
   }
@@ -2405,17 +2409,18 @@ class NirvanaClient {
   Future<Uint8List> buildUnsignedRepayNirvTransaction({
     required String userPubkey,
     required double nirvAmount,
-    NirvanaUserAccounts? userAccounts,
+    required NirvanaUserAccounts userAccounts,
+    required String personalAccount,
+    required String recentBlockhash,
   }) async {
-    // Build instruction using shared helper
-    final instruction = await _buildRepayNirvInstruction(
+    final instruction = _buildRepayNirvInstruction(
       userPubkey: userPubkey,
       nirvAmount: nirvAmount,
       userAccounts: userAccounts,
+      personalAccount: personalAccount,
     );
 
-    // Get recent blockhash
-    final blockhash = await _rpcClient.getLatestBlockhash();
+    final blockhash = recentBlockhash;
 
     // Build and compile message
     final message = Message(instructions: [instruction]);
@@ -2443,10 +2448,16 @@ class NirvanaClient {
     required double nirvAmount,
   }) async {
     try {
-      // Build instruction using shared helper
-      final instruction = await _buildRepayNirvInstruction(
+      final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
+      if (personalAccount == null) {
+        throw Exception('User does not have a personal account. Cannot repay without borrowed position.');
+      }
+      final accounts = await _accountResolver.resolveUserAccounts(userPubkey);
+      final instruction = _buildRepayNirvInstruction(
         userPubkey: userPubkey,
         nirvAmount: nirvAmount,
+        userAccounts: accounts,
+        personalAccount: personalAccount,
       );
 
       // Create and send transaction
