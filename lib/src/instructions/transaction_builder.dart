@@ -1,8 +1,8 @@
 import 'dart:typed_data';
 import 'package:solana/solana.dart';
-import 'package:solana/base58.dart';
 import 'package:solana/encoder.dart';
 import '../models/config.dart';
+import '../discriminators.dart';
 
 /// Builds Solana instructions for Nirvana V2 protocol operations
 class NirvanaTransactionBuilder {
@@ -23,8 +23,7 @@ class NirvanaTransactionBuilder {
     required bool useNirv,
     int minAnaLamports = 0,
   }) {
-    // buy_exact2 discriminator
-    final discriminator = [109, 5, 199, 243, 164, 233, 19, 152];
+    const discriminator = NirvanaDiscriminators.buyExact2;
     
     // Build instruction data
     final amountBytes = Uint8List(8);
@@ -75,8 +74,7 @@ class NirvanaTransactionBuilder {
     int minOutputLamports = 0,
     bool useNirv = false,
   }) {
-    // sell2 discriminator (confirmed from Chrome injection analysis)
-    final discriminator = [47, 191, 120, 1, 28, 35, 253, 79];
+    const discriminator = NirvanaDiscriminators.sell2;
 
     // Build instruction data
     final anaBytes = Uint8List(8);
@@ -123,8 +121,7 @@ class NirvanaTransactionBuilder {
     required String personalAccount,
     required int anaLamports,
   }) {
-    // deposit_ana discriminator (from Chrome injection analysis)
-    final discriminator = [68, 100, 197, 87, 22, 85, 190, 78];
+    const discriminator = NirvanaDiscriminators.depositAna;
 
     // Vault ANA account discovered from Chrome injection
     const String vaultAnaAccount = 'GUEs3s1j1gvQ2F7xMXh6vHnB5t1bQG4zev1qEfWJKEea';
@@ -163,8 +160,7 @@ class NirvanaTransactionBuilder {
     required String personalAccount,
     required int anaLamports,
   }) {
-    // withdraw_ana discriminator (from browser injection log)
-    final discriminator = [93, 87, 203, 252, 78, 187, 97, 82];
+    const discriminator = NirvanaDiscriminators.withdrawAna;
 
     // Vault ANA account (source for withdrawn tokens)
     const String vaultAnaAccount = 'GUEs3s1j1gvQ2F7xMXh6vHnB5t1bQG4zev1qEfWJKEea';
@@ -201,8 +197,7 @@ class NirvanaTransactionBuilder {
     required String userPubkey,
     required String personalAccount,
   }) {
-    // init_personal_account discriminator
-    final discriminator = [161, 176, 40, 213, 71, 95, 78, 42];
+    const discriminator = NirvanaDiscriminators.initPersonalAccount;
     
     // Build accounts
     final accounts = [
@@ -226,8 +221,7 @@ class NirvanaTransactionBuilder {
     required String userNirvAccount,
     required int nirvLamports,
   }) {
-    // borrow_nirv discriminator
-    final discriminator = [155, 1, 43, 62, 79, 104, 66, 42];
+    const discriminator = NirvanaDiscriminators.borrowNirv;
     
     // Build instruction data
     final amountBytes = Uint8List(8);
@@ -270,8 +264,7 @@ class NirvanaTransactionBuilder {
     required int pranaLamports,
     required bool useNirv,
   }) {
-    // realize discriminator (confirmed from Chrome injection analysis)
-    final discriminator = [64, 34, 113, 17, 141, 79, 61, 38];
+    const discriminator = NirvanaDiscriminators.realize;
 
     // Build instruction data
     final pranaBytes = Uint8List(8);
@@ -321,8 +314,7 @@ class NirvanaTransactionBuilder {
     required String userNirvAccount,
     required int nirvLamports,
   }) {
-    // repay discriminator (confirmed from Chrome injection analysis)
-    final discriminator = [28, 158, 130, 191, 125, 127, 195, 94];
+    const discriminator = NirvanaDiscriminators.repay;
 
     // Build instruction data
     final nirvBytes = Uint8List(8);
@@ -358,7 +350,7 @@ class NirvanaTransactionBuilder {
   /// Discriminator: [205, 200, 207, 206, 57, 131, 162, 126]
   /// Data: 8-byte discriminator + 8-byte unix timestamp (seconds) + 1-byte flag
   Instruction buildRefreshPriceCurveInstruction() {
-    final discriminator = [205, 200, 207, 206, 57, 131, 162, 126];
+    const discriminator = NirvanaDiscriminators.refreshPriceCurve;
 
     // Current unix timestamp in seconds
     final now = DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000;
@@ -394,7 +386,7 @@ class NirvanaTransactionBuilder {
   Instruction buildRefreshPersonalAccountInstruction({
     required String personalAccount,
   }) {
-    final discriminator = [54, 112, 82, 14, 216, 131, 165, 126];
+    const discriminator = NirvanaDiscriminators.refreshPersonalAccount;
 
     // 2 accounts: tenant, personal account
     final accounts = [
@@ -416,8 +408,7 @@ class NirvanaTransactionBuilder {
     required String personalAccount,
     required String userPranaAccount,
   }) {
-    // claim_prana discriminator (from browser injection log)
-    final discriminator = [47, 124, 203, 241, 4, 53, 226, 166];
+    const discriminator = NirvanaDiscriminators.claimPrana;
 
     // No amount parameter - claims all available prANA
     final instructionData = [...discriminator];
@@ -449,8 +440,7 @@ class NirvanaTransactionBuilder {
     required String userAnaAccount,
     required String userNirvAccount,
   }) {
-    // claim_revenue_share discriminator (from browser injection log)
-    final discriminator = [69, 140, 105, 250, 40, 226, 233, 116];
+    const discriminator = NirvanaDiscriminators.claimRevenueShare;
 
     // No amount parameter - claims all available revenue share
     final instructionData = [...discriminator];

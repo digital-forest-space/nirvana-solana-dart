@@ -15,6 +15,9 @@ export 'src/models/nirvana_transaction.dart';
 // RPC
 export 'src/rpc/solana_rpc_client.dart';
 
+// Discriminators
+export 'src/discriminators.dart';
+
 // Instructions (advanced users)
 export 'src/instructions/transaction_builder.dart';
 

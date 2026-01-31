@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'package:solana/solana.dart';
 import 'package:solana/encoder.dart';
 import 'config.dart';
+import '../discriminators.dart';
 
 /// Builds Solana instructions for Samsara protocol operations (navTokens)
 class SamsaraTransactionBuilder {
@@ -10,11 +11,8 @@ class SamsaraTransactionBuilder {
   SamsaraTransactionBuilder({SamsaraConfig? config})
       : _config = config ?? SamsaraConfig.mainnet();
 
-  /// Mayflower init_personal_position discriminator: [146, 163, 167, 48, 30, 216, 179, 88]
-  static const List<int> _initPositionDiscriminator = [146, 163, 167, 48, 30, 216, 179, 88];
-
-  /// Mayflower buy discriminator: [30, 205, 124, 67, 20, 142, 236, 136]
-  static const List<int> _buyDiscriminator = [30, 205, 124, 67, 20, 142, 236, 136];
+  static const List<int> _initPositionDiscriminator = NirvanaDiscriminators.initPersonalPosition;
+  static const List<int> _buyDiscriminator = NirvanaDiscriminators.buyNavToken;
 
   /// Build init_personal_position instruction
   /// This must be called before the first buy for a fresh wallet
