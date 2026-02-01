@@ -20,6 +20,7 @@ class SamsaraTransactionBuilder {
     required String userPubkey,
     required String personalPosition,
     required String userShares,
+    required String logAccount,
     required NavTokenMarket market,
   }) {
     final accounts = [
@@ -71,11 +72,11 @@ class SamsaraTransactionBuilder {
         isSigner: false,
         isWriteable: false,
       ),
-      // 8: Authority PDA
+      // 8: Mayflower log account (writable)
       AccountMeta(
-        pubKey: Ed25519HDPublicKey.fromBase58(market.authorityPda),
+        pubKey: Ed25519HDPublicKey.fromBase58(logAccount),
         isSigner: false,
-        isWriteable: false,
+        isWriteable: true,
       ),
       // 9: Mayflower Program
       AccountMeta(
@@ -109,6 +110,7 @@ class SamsaraTransactionBuilder {
     required String userNavSolAccount,
     required String personalPosition,
     required String userShares,
+    required String logAccount,
     required NavTokenMarket market,
     required int inputLamports,
     int minOutputLamports = 0,
@@ -224,11 +226,11 @@ class SamsaraTransactionBuilder {
         isSigner: false,
         isWriteable: false,
       ),
-      // 16: Authority PDA
+      // 16: Mayflower log account (writable)
       AccountMeta(
-        pubKey: Ed25519HDPublicKey.fromBase58(market.authorityPda),
+        pubKey: Ed25519HDPublicKey.fromBase58(logAccount),
         isSigner: false,
-        isWriteable: false,
+        isWriteable: true,
       ),
       // 17: Mayflower Program
       AccountMeta(

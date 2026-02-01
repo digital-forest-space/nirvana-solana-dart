@@ -8,6 +8,7 @@ import 'package:solana/base58.dart';
 
 // Import samsara modules using package imports
 import 'package:nirvana_solana/src/samsara/config.dart';
+import 'package:nirvana_solana/src/samsara/pda.dart';
 import 'package:nirvana_solana/src/samsara/transaction_builder.dart';
 
 /// Execute a buy navSOL transaction (SOL → navSOL)
@@ -95,27 +96,43 @@ void main(List<String> args) async {
   final userWsolAta = await _getAssociatedTokenAddress(userPubkey, market.baseMint);
   final userNavSolAta = await _getAssociatedTokenAddress(userPubkey, market.navMint);
 
-  // Find user's personal_position by querying program accounts
-  // This is more robust than PDA derivation - same approach as Nirvana
-  final positionInfo = await _findUserPosition(rpcUrl, userPubkey);
+  // Derive personal_position and userShares PDAs
+  final mayflowerPda = MayflowerPda.mainnet();
+  final marketMetaKey = Ed25519HDPublicKey.fromBase58(market.marketMetadata);
+  final ownerKey = Ed25519HDPublicKey.fromBase58(userPubkey);
 
-  if (positionInfo == null) {
-    // For new users, try PDA derivation as fallback
-    final derivedPosition = await _derivePersonalPosition(userPubkey, market.marketMetadata);
-    print(jsonEncode({
-      'success': false,
-      'error': 'Personal position not found. Please use the Samsara web UI to make your first transaction, then this script will work for subsequent transactions.',
-      'derivedPosition': derivedPosition,
-      'note': 'The user_shares PDA derivation is proprietary to Mayflower and cannot be derived client-side.',
-    }));
-    exit(1);
+  final personalPositionKey = await mayflowerPda.personalPosition(
+    marketMeta: marketMetaKey,
+    owner: ownerKey,
+  );
+  final userSharesKey = await mayflowerPda.personalPositionEscrow(
+    personalPosition: personalPositionKey,
+  );
+
+  final personalPosition = personalPositionKey.toBase58();
+  final userShares = userSharesKey.toBase58();
+
+  // Check if position already exists on-chain
+  bool needsInit = false;
+  try {
+    final response = await http.post(
+      Uri.parse(rpcUrl),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'jsonrpc': '2.0',
+        'id': 1,
+        'method': 'getAccountInfo',
+        'params': [personalPosition, {'encoding': 'base64'}],
+      }),
+    );
+    final result = jsonDecode(response.body);
+    needsInit = result['result']?['value'] == null;
+  } catch (_) {
+    needsInit = true;
   }
 
-  final personalPosition = positionInfo['personalPosition']!;
-  final userShares = positionInfo['userShares']!;
   if (verbose) {
-    print('  Found existing position via getProgramAccounts');
-    print('  Personal Position: $personalPosition');
+    print('  Personal Position: $personalPosition${needsInit ? ' (will be created)' : ''}');
     print('  User Shares: $userShares');
   }
 
@@ -161,7 +178,24 @@ void main(List<String> args) async {
     ),
   ];
 
-  // 7. Mayflower buy navSOL (position must already exist)
+  // Derive Mayflower log account (needed for both init and buy)
+  final mayflowerLogAccount = (await mayflowerPda.logAccount()).toBase58();
+
+  // 7. Init personal position if needed (first-time user)
+  if (needsInit) {
+    if (verbose) print('  Adding init_personal_position instruction (first-time user)');
+    instructions.add(
+      builder.buildInitPositionInstruction(
+        userPubkey: userPubkey,
+        personalPosition: personalPosition,
+        userShares: userShares,
+        logAccount: mayflowerLogAccount,
+        market: market,
+      ),
+    );
+  }
+
+  // 8. Mayflower buy navSOL
   instructions.add(
     builder.buildBuyNavSolInstruction(
       userPubkey: userPubkey,
@@ -169,13 +203,14 @@ void main(List<String> args) async {
       userNavSolAccount: userNavSolAta,
       personalPosition: personalPosition,
       userShares: userShares,
+      logAccount: mayflowerLogAccount,
       market: market,
       inputLamports: lamports,
       minOutputLamports: 0, // No slippage protection for now
     ),
   );
 
-  // 8. Close wSOL account (return dust to user)
+  // 9. Close wSOL account (return dust to user)
   instructions.add(
     builder.buildCloseAccountInstruction(
       account: userWsolAta,
@@ -455,90 +490,5 @@ class _AccountMeta {
   });
 }
 
-/// Find user's personal_position by querying Mayflower program accounts
-/// This uses getProgramAccounts with filters - same approach as Nirvana
-/// Returns both personalPosition and userShares addresses, or null if not found
-Future<Map<String, String>?> _findUserPosition(String rpcUrl, String userPubkey) async {
-  const mayflowerProgram = 'AVMmmRzwc2kETQNhPiFVnyu62HrgsQXTD6D7SnSfEz7v';
-
-  try {
-    final response = await http.post(
-      Uri.parse(rpcUrl),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'jsonrpc': '2.0',
-        'id': 1,
-        'method': 'getProgramAccounts',
-        'params': [
-          mayflowerProgram,
-          {
-            'encoding': 'base64',
-            'filters': [
-              {'dataSize': 121}, // personal_position account size
-              {
-                'memcmp': {
-                  'offset': 40, // user pubkey is at byte 40 in the account data
-                  'bytes': userPubkey,
-                }
-              }
-            ]
-          }
-        ]
-      }),
-    );
-
-    final result = jsonDecode(response.body);
-
-    if (result['error'] != null) {
-      return null;
-    }
-
-    final accounts = result['result'] as List;
-    if (accounts.isEmpty) {
-      return null;
-    }
-
-    // Get the first matching account
-    final account = accounts.first;
-    final personalPosition = account['pubkey'] as String;
-
-    // Extract user_shares from account data (bytes 72-103)
-    final dataBase64 = account['account']['data'][0] as String;
-    final data = base64Decode(dataBase64);
-
-    if (data.length < 104) {
-      return null;
-    }
-
-    final userSharesBytes = data.sublist(72, 104);
-    final userShares = Ed25519HDPublicKey(userSharesBytes).toBase58();
-
-    return {
-      'personalPosition': personalPosition,
-      'userShares': userShares,
-    };
-  } catch (e) {
-    return null;
-  }
-}
-
-/// Derive personal_position PDA (fallback method)
-/// Seeds: ["personal_position", market_metadata, user_pubkey]
-/// Note: The seed order is [prefix, marketMetadata, user] NOT [prefix, user, marketMetadata]
-Future<String> _derivePersonalPosition(String userPubkey, String marketMetadata) async {
-  final programId = Ed25519HDPublicKey.fromBase58('AVMmmRzwc2kETQNhPiFVnyu62HrgsQXTD6D7SnSfEz7v');
-  final seeds = [
-    'personal_position'.codeUnits,
-    Ed25519HDPublicKey.fromBase58(marketMetadata).bytes,
-    Ed25519HDPublicKey.fromBase58(userPubkey).bytes,
-  ];
-
-  final pda = await Ed25519HDPublicKey.findProgramAddress(
-    seeds: seeds,
-    programId: programId,
-  );
-
-  return pda.toBase58();
-}
 
 

@@ -110,20 +110,22 @@ Seeds: ["personal_position", market_metadata, user_pubkey]
 Program: AVMmmRzwc2kETQNhPiFVnyu62HrgsQXTD6D7SnSfEz7v (Mayflower)
 ```
 
-### user_shares PDA
+### user_shares PDA (personalPositionEscrow)
 
 Token account holding user's navToken shares, owned by personal_position.
 
-**Important**: The user_shares address cannot be derived client-side using standard PDA patterns. It is stored within the personal_position account data at bytes 72-103.
+The user_shares address is the `personalPositionEscrow` PDA:
 
-For existing users:
-1. Derive personal_position PDA using seeds above
-2. Read personal_position account data
-3. Extract user_shares pubkey from bytes 72-103
+```
+Seeds: ["personal_position_escrow", personal_position]
+Program: AVMmmRzwc2kETQNhPiFVnyu62HrgsQXTD6D7SnSfEz7v (Mayflower)
+```
 
-For new users:
-- The init_personal_position instruction creates both accounts
-- Currently, new users must use the Samsara web UI for their first transaction
+This was verified on-chain: the derived `personalPositionEscrow` matches the
+address stored in personal_position account data at bytes 72-103.
+
+For new users, the buy script automatically prepends `init_personal_position`
+to create both accounts in the same transaction.
 
 ### personal_position Account Structure
 
@@ -145,9 +147,10 @@ Offset 104+:   Additional data (amounts, etc.)
 ## Implementation Status
 
 ### Completed
-- [x] Buy navTokens (SOL → navSOL) - for existing users
+- [x] Buy navTokens (SOL → navSOL) - works for new and existing users
 - [x] personal_position PDA derivation
-- [x] user_shares extraction from account data
+- [x] user_shares PDA derivation (personalPositionEscrow)
+- [x] New user support (auto init_personal_position before first buy)
 
 ### Pending
 - [ ] Sell navTokens (navSOL → SOL)
@@ -156,8 +159,6 @@ Offset 104+:   Additional data (amounts, etc.)
 - [ ] Borrow against staked navTokens
 - [ ] Repay borrowed positions
 - [ ] Claim rewards/revenue share
-- [ ] New user support (init_personal_position)
-- [ ] user_shares PDA derivation (proprietary to Mayflower)
 
 ## Technical Notes
 
