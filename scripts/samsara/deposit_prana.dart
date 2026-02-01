@@ -27,7 +27,8 @@ void main(List<String> args) async {
     print('Usage: dart scripts/samsara/deposit_prana.dart <keypair_path> <prana_amount> [options]');
     print('');
     print('Options:');
-    print('  --market <name>  Market name (default: navSOL). Available: ${NavTokenMarket.availableMarkets.join(", ")}');
+    final depositMarkets = NavTokenMarket.all.values.where((m) => m.samsaraMarket.isNotEmpty).map((m) => m.name).toList();
+    print('  --market <name>  Market name (default: navSOL). Available: ${depositMarkets.join(", ")}');
     print('  --rpc <url>      Custom RPC endpoint');
     print('  --verbose        Show detailed output before JSON result');
     print('  --dry-run        Build transaction but don\'t send');
@@ -66,18 +67,20 @@ void main(List<String> args) async {
   // Look up market
   final market = NavTokenMarket.byName(marketName);
   if (market == null) {
+    final depositMarkets = NavTokenMarket.all.values.where((m) => m.samsaraMarket.isNotEmpty).map((m) => m.name).toList();
     print(jsonEncode({
       'success': false,
       'error': 'Unknown market: $marketName',
-      'available': NavTokenMarket.availableMarkets,
+      'available': depositMarkets,
     }));
     exit(1);
   }
 
   if (market.samsaraMarket.isEmpty) {
+    final depositMarkets = NavTokenMarket.all.values.where((m) => m.samsaraMarket.isNotEmpty).map((m) => m.name).toList();
     print(jsonEncode({
       'success': false,
-      'error': 'Samsara market address not configured for ${market.name}',
+      'error': 'Samsara market address not configured for ${market.name}. Available: ${depositMarkets.join(", ")}',
     }));
     exit(1);
   }
