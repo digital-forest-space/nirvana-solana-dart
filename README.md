@@ -204,6 +204,82 @@ The `parseTransaction()` method returns a `NirvanaTransaction` with type:
 - `claimRevenueShare` - Revenue share claim
 - `unknown` - Unrecognized transaction
 
+## Samsara Protocol (navTokens)
+
+Support for the Samsara/Mayflower protocol: navSOL, navZEC, navCBBTC, navETH derivative markets.
+
+### Samsara Operations
+
+| Operation | Description | Script |
+|-----------|-------------|--------|
+| **Fetch navToken Price** | Floor and transaction price for any navToken market | [fetch_nav_price.dart](scripts/samsara/fetch_nav_price.dart) |
+| **Buy navSOL** | Purchase navSOL with SOL | [buy_nav_sol.dart](scripts/samsara/buy_nav_sol.dart) |
+| **Deposit prANA** | Deposit prANA to a market's governance account | [deposit_prana.dart](scripts/samsara/deposit_prana.dart) |
+| **Discover Markets** | Discover all navToken markets from on-chain data | [discover_markets.dart](scripts/samsara/discover_markets.dart) |
+| **Check PDA Seeds** | Auto-verify PDA seeds against the Samsara web app | [check_pda_seeds.dart](scripts/samsara/check_pda_seeds.dart) |
+
+### Samsara Examples
+
+```bash
+# Fetch navSOL floor price
+dart scripts/samsara/fetch_nav_price.dart --market navSOL
+
+# Buy 0.01 SOL worth of navSOL
+dart scripts/samsara/buy_nav_sol.dart ~/.config/solana/id.json 0.01 --verbose
+
+# Deposit 1.0 prANA to navSOL market
+dart scripts/samsara/deposit_prana.dart ~/.config/solana/id.json 1.0 --market navSOL --verbose
+
+# Dry run (build tx without sending)
+dart scripts/samsara/deposit_prana.dart ~/.config/solana/id.json 1.0 --market navCBBTC --dry-run
+
+# Discover all markets with health signals
+dart scripts/samsara/discover_markets.dart --verbose --health
+
+# Verify PDA seeds haven't changed upstream
+dart scripts/samsara/check_pda_seeds.dart --verbose
+```
+
+### Samsara Library
+
+```dart
+import 'package:nirvana_solana/src/samsara/samsara_client.dart';
+import 'package:nirvana_solana/src/samsara/config.dart';
+import 'package:nirvana_solana/src/samsara/pda.dart';
+
+// Fetch floor price
+final client = SamsaraClient.fromRpcClient(rpcClient);
+final price = await client.fetchFloorPrice(NavTokenMarket.navSol());
+
+// Build unsigned deposit prANA transaction
+final txBytes = await client.buildUnsignedDepositPranaTransaction(
+  userPubkey: 'YourPublicKey',
+  market: NavTokenMarket.navSol(),
+  pranaAmount: 1.0,
+  recentBlockhash: blockhash,
+);
+
+// Derive PDAs directly
+final pda = SamsaraPda.mainnet();
+final govAccount = await pda.personalGovAccount(
+  market: samsaraMarketKey,
+  owner: ownerKey,
+);
+```
+
+### Samsara navToken Markets
+
+| Market | Base Token | Status |
+|--------|-----------|--------|
+| navSOL | SOL | Supported |
+| navZEC | ZEC | Supported |
+| navCBBTC | cbBTC | Supported |
+| navETH | WETH | Supported |
+
+### PDA Seed Verification
+
+PDA seeds are extracted from the Samsara web app's client-side JavaScript bundles. Run `check_pda_seeds.dart` to verify that our local seed definitions still match the deployed web app. See [docs/samsara/pda_seeds.md](docs/samsara/pda_seeds.md) for the full reference and discovery method.
+
 ## Token Addresses
 
 | Token | Mint Address |
