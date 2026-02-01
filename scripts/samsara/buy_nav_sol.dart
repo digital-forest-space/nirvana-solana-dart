@@ -1,15 +1,11 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
-import 'package:http/http.dart' as http;
 import 'package:solana/solana.dart';
-import 'package:solana/encoder.dart';
-import 'package:solana/base58.dart';
 
-// Import samsara modules using package imports
 import 'package:nirvana_solana/src/samsara/config.dart';
-import 'package:nirvana_solana/src/samsara/pda.dart';
-import 'package:nirvana_solana/src/samsara/transaction_builder.dart';
+import 'package:nirvana_solana/src/samsara/samsara_client.dart';
+import 'package:nirvana_solana/src/rpc/solana_rpc_client.dart';
 
 /// Execute a buy navSOL transaction (SOL → navSOL)
 ///
@@ -71,180 +67,52 @@ void main(List<String> args) async {
   final userPubkey = keypair.publicKey.toBase58();
   if (verbose) print('Wallet: $userPubkey');
 
-  // Create Solana client
+  // Create SamsaraClient
   if (verbose) print('RPC: $rpcUrl');
-  final rpcUri = Uri.parse(rpcUrl);
-  final client = SolanaClient(
-    rpcUrl: rpcUri,
-    websocketUrl: rpcUri.replace(scheme: rpcUri.scheme == 'https' ? 'wss' : 'ws'),
+  final uri = Uri.parse(rpcUrl);
+  final wsUrl = Uri.parse(rpcUrl.replaceFirst('https', 'wss'));
+  final solanaClient = SolanaClient(
+    rpcUrl: uri,
+    websocketUrl: wsUrl,
+    timeout: const Duration(seconds: 30),
   );
+  final rpcClient = DefaultSolanaRpcClient(solanaClient, rpcUrl: uri);
+  final client = SamsaraClient(rpcClient: rpcClient);
 
   // Get market config
   final market = NavTokenMarket.navSol();
-  final config = SamsaraConfig.mainnet();
-  final builder = SamsaraTransactionBuilder(config: config);
-
-  // Convert SOL to lamports
   final lamports = (solAmount * 1e9).toInt();
+
   if (verbose) {
     print('\nTransaction:');
     print('  Input: $solAmount SOL ($lamports lamports)');
     print('  Market: ${market.name}');
   }
 
-  // Derive user token accounts
-  final userWsolAta = await _getAssociatedTokenAddress(userPubkey, market.baseMint);
-  final userNavSolAta = await _getAssociatedTokenAddress(userPubkey, market.navMint);
-
-  // Derive personal_position and userShares PDAs
-  final mayflowerPda = MayflowerPda.mainnet();
-  final marketMetaKey = Ed25519HDPublicKey.fromBase58(market.marketMetadata);
-  final ownerKey = Ed25519HDPublicKey.fromBase58(userPubkey);
-
-  final personalPositionKey = await mayflowerPda.personalPosition(
-    marketMeta: marketMetaKey,
-    owner: ownerKey,
-  );
-  final userSharesKey = await mayflowerPda.personalPositionEscrow(
-    personalPosition: personalPositionKey,
-  );
-
-  final personalPosition = personalPositionKey.toBase58();
-  final userShares = userSharesKey.toBase58();
-
-  // Check if position already exists on-chain
-  bool needsInit = false;
-  try {
-    final response = await http.post(
-      Uri.parse(rpcUrl),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'jsonrpc': '2.0',
-        'id': 1,
-        'method': 'getAccountInfo',
-        'params': [personalPosition, {'encoding': 'base64'}],
-      }),
-    );
-    final result = jsonDecode(response.body);
-    needsInit = result['result']?['value'] == null;
-  } catch (_) {
-    needsInit = true;
-  }
-
-  if (verbose) {
-    print('  Personal Position: $personalPosition${needsInit ? ' (will be created)' : ''}');
-    print('  User Shares: $userShares');
-  }
-
-  if (verbose) {
-    print('  User wSOL ATA: $userWsolAta');
-    print('  User navSOL ATA: $userNavSolAta');
-  }
-
-  // Build transaction instructions
-  if (verbose) print('\nBuilding transaction...');
-
-  final instructions = <Instruction>[
-    // 1. Set compute unit limit
-    builder.buildSetComputeUnitLimitInstruction(400000),
-
-    // 2. Set compute unit price (for priority)
-    builder.buildSetComputeUnitPriceInstruction(280000),
-
-    // 3. Create wSOL ATA (idempotent)
-    builder.buildCreateAtaIdempotentInstruction(
-      payer: userPubkey,
-      associatedTokenAccount: userWsolAta,
-      owner: userPubkey,
-      mint: market.baseMint,
-    ),
-
-    // 4. Transfer SOL to wSOL ATA
-    builder.buildTransferInstruction(
-      from: userPubkey,
-      to: userWsolAta,
-      lamports: lamports,
-    ),
-
-    // 5. Sync native (wrap SOL)
-    builder.buildSyncNativeInstruction(userWsolAta),
-
-    // 6. Create navSOL ATA (idempotent)
-    builder.buildCreateAtaIdempotentInstruction(
-      payer: userPubkey,
-      associatedTokenAccount: userNavSolAta,
-      owner: userPubkey,
-      mint: market.navMint,
-    ),
-  ];
-
-  // Derive Mayflower log account (needed for both init and buy)
-  final mayflowerLogAccount = (await mayflowerPda.logAccount()).toBase58();
-
-  // 7. Init personal position if needed (first-time user)
-  if (needsInit) {
-    if (verbose) print('  Adding init_personal_position instruction (first-time user)');
-    instructions.add(
-      builder.buildInitPositionInstruction(
-        userPubkey: userPubkey,
-        personalPosition: personalPosition,
-        userShares: userShares,
-        logAccount: mayflowerLogAccount,
-        market: market,
-      ),
-    );
-  }
-
-  // 8. Mayflower buy navSOL
-  instructions.add(
-    builder.buildBuyNavSolInstruction(
-      userPubkey: userPubkey,
-      userWsolAccount: userWsolAta,
-      userNavSolAccount: userNavSolAta,
-      personalPosition: personalPosition,
-      userShares: userShares,
-      logAccount: mayflowerLogAccount,
-      market: market,
-      inputLamports: lamports,
-      minOutputLamports: 0, // No slippage protection for now
-    ),
-  );
-
-  // 9. Close wSOL account (return dust to user)
-  instructions.add(
-    builder.buildCloseAccountInstruction(
-      account: userWsolAta,
-      destination: userPubkey,
-      owner: userPubkey,
-    ),
-  );
-
-  if (verbose) print('  Built ${instructions.length} instructions');
-
   // Get recent blockhash
-  final blockhashResponse = await client.rpcClient.getLatestBlockhash();
-  final blockhash = blockhashResponse.value.blockhash;
+  final blockhash = await rpcClient.getLatestBlockhash();
   if (verbose) print('  Blockhash: $blockhash');
 
-  // Build unsigned transaction bytes
-  final unsignedTxBytes = _buildUnsignedTransaction(
-    instructions: instructions,
-    feePayer: userPubkey,
+  // Build unsigned transaction via SamsaraClient
+  if (verbose) print('\nBuilding transaction...');
+  final unsignedTxBytes = await client.buildUnsignedBuyNavSolTransaction(
+    userPubkey: userPubkey,
+    market: market,
+    inputLamports: lamports,
     recentBlockhash: blockhash,
+    minOutputLamports: 0,
+    computeUnitLimit: 400000,
+    computeUnitPrice: 280000,
   );
 
   if (dryRun) {
-    if (verbose) print('\n🔍 Dry run - transaction not sent');
+    if (verbose) print('\nDry run - transaction not sent');
 
-    // Output transaction details
     final txBase64 = base64Encode(unsignedTxBytes);
     print(jsonEncode({
       'success': true,
       'dryRun': true,
       'transaction': txBase64,
-      'instructionCount': instructions.length,
-      'userWsolAta': userWsolAta,
-      'userNavSolAta': userNavSolAta,
       'inputLamports': lamports,
     }));
     return;
@@ -256,13 +124,13 @@ void main(List<String> args) async {
   try {
     final signedTxBytes = await _signTransaction(unsignedTxBytes, keypair);
 
-    final signature = await client.rpcClient.sendTransaction(
+    final signature = await solanaClient.rpcClient.sendTransaction(
       base64Encode(signedTxBytes),
       preflightCommitment: Commitment.confirmed,
     );
 
     if (verbose) {
-      print('\n✅ Transaction sent!');
+      print('\nTransaction sent!');
       print('  Signature: $signature');
       print('  Explorer: https://solscan.io/tx/$signature');
     }
@@ -276,7 +144,7 @@ void main(List<String> args) async {
     }));
   } catch (e) {
     if (verbose) {
-      print('\n❌ Transaction failed!');
+      print('\nTransaction failed!');
       print('  Error: $e');
     }
     print(jsonEncode({
@@ -287,188 +155,18 @@ void main(List<String> args) async {
   }
 }
 
-/// Derive associated token address
-Future<String> _getAssociatedTokenAddress(String owner, String mint) async {
-  final ownerPubkey = Ed25519HDPublicKey.fromBase58(owner);
-  final mintPubkey = Ed25519HDPublicKey.fromBase58(mint);
-  const tokenProgramId = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
-  const ataProgramId = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL';
-
-  final seeds = [
-    ownerPubkey.bytes,
-    Ed25519HDPublicKey.fromBase58(tokenProgramId).bytes,
-    mintPubkey.bytes,
-  ];
-
-  final pda = await Ed25519HDPublicKey.findProgramAddress(
-    seeds: seeds,
-    programId: Ed25519HDPublicKey.fromBase58(ataProgramId),
-  );
-
-  return pda.toBase58();
-}
-
-/// Build unsigned transaction bytes
-Uint8List _buildUnsignedTransaction({
-  required List<Instruction> instructions,
-  required String feePayer,
-  required String recentBlockhash,
-}) {
-  // Collect all unique accounts
-  final accountsMap = <String, _AccountMeta>{};
-
-  // Fee payer is first, always signer and writable
-  accountsMap[feePayer] = _AccountMeta(
-    pubkey: feePayer,
-    isSigner: true,
-    isWriteable: true,
-  );
-
-  // Collect accounts from all instructions
-  for (final ix in instructions) {
-    for (final acc in ix.accounts) {
-      final pubkey = acc.pubKey.toBase58();
-      final existing = accountsMap[pubkey];
-      if (existing != null) {
-        // Merge flags (more permissive wins)
-        accountsMap[pubkey] = _AccountMeta(
-          pubkey: pubkey,
-          isSigner: existing.isSigner || acc.isSigner,
-          isWriteable: existing.isWriteable || acc.isWriteable,
-        );
-      } else {
-        accountsMap[pubkey] = _AccountMeta(
-          pubkey: pubkey,
-          isSigner: acc.isSigner,
-          isWriteable: acc.isWriteable,
-        );
-      }
-    }
-
-    // Add program ID (not signer, not writable)
-    final programId = ix.programId.toBase58();
-    if (!accountsMap.containsKey(programId)) {
-      accountsMap[programId] = _AccountMeta(
-        pubkey: programId,
-        isSigner: false,
-        isWriteable: false,
-      );
-    }
-  }
-
-  // Sort accounts: signers first, then writable, then readonly
-  final accounts = accountsMap.values.toList();
-  accounts.sort((a, b) {
-    if (a.isSigner != b.isSigner) return a.isSigner ? -1 : 1;
-    if (a.isWriteable != b.isWriteable) return a.isWriteable ? -1 : 1;
-    return 0;
-  });
-
-  // Ensure fee payer is first
-  final feePayerIndex = accounts.indexWhere((a) => a.pubkey == feePayer);
-  if (feePayerIndex > 0) {
-    final fp = accounts.removeAt(feePayerIndex);
-    accounts.insert(0, fp);
-  }
-
-  // Build account index map
-  final accountIndexMap = <String, int>{};
-  for (var i = 0; i < accounts.length; i++) {
-    accountIndexMap[accounts[i].pubkey] = i;
-  }
-
-  // Count signers and writable accounts
-  var numRequiredSignatures = 0;
-  var numReadonlySignedAccounts = 0;
-  var numReadonlyUnsignedAccounts = 0;
-
-  for (final acc in accounts) {
-    if (acc.isSigner) {
-      numRequiredSignatures++;
-      if (!acc.isWriteable) numReadonlySignedAccounts++;
-    } else {
-      if (!acc.isWriteable) numReadonlyUnsignedAccounts++;
-    }
-  }
-
-  // Build message
-  final messageBuilder = BytesBuilder();
-
-  // Header
-  messageBuilder.addByte(numRequiredSignatures);
-  messageBuilder.addByte(numReadonlySignedAccounts);
-  messageBuilder.addByte(numReadonlyUnsignedAccounts);
-
-  // Account addresses (compact-u16 length + addresses)
-  messageBuilder.add(_encodeCompactU16(accounts.length));
-  for (final acc in accounts) {
-    messageBuilder.add(Ed25519HDPublicKey.fromBase58(acc.pubkey).bytes);
-  }
-
-  // Recent blockhash
-  messageBuilder.add(base58decode(recentBlockhash));
-
-  // Instructions (compact-u16 length + instructions)
-  messageBuilder.add(_encodeCompactU16(instructions.length));
-  for (final ix in instructions) {
-    // Program ID index
-    messageBuilder.addByte(accountIndexMap[ix.programId.toBase58()]!);
-
-    // Account indices (compact-u16 length + indices)
-    messageBuilder.add(_encodeCompactU16(ix.accounts.length));
-    for (final acc in ix.accounts) {
-      messageBuilder.addByte(accountIndexMap[acc.pubKey.toBase58()]!);
-    }
-
-    // Instruction data (compact-u16 length + data)
-    messageBuilder.add(_encodeCompactU16(ix.data.length));
-    messageBuilder.add(ix.data.toList());
-  }
-
-  final messageBytes = Uint8List.fromList(messageBuilder.toBytes());
-
-  // Build transaction with placeholder signature
-  final txBuilder = BytesBuilder();
-  txBuilder.addByte(1); // 1 signature required
-  txBuilder.add(Uint8List(64)); // Placeholder signature (64 zeros)
-  txBuilder.add(messageBytes);
-
-  return Uint8List.fromList(txBuilder.toBytes());
-}
-
-/// Encode a number as compact-u16
-List<int> _encodeCompactU16(int value) {
-  if (value < 0x80) {
-    return [value];
-  } else if (value < 0x4000) {
-    return [
-      (value & 0x7f) | 0x80,
-      (value >> 7) & 0x7f,
-    ];
-  } else {
-    return [
-      (value & 0x7f) | 0x80,
-      ((value >> 7) & 0x7f) | 0x80,
-      (value >> 14) & 0x3,
-    ];
-  }
-}
-
 /// Sign an unsigned transaction
 Future<Uint8List> _signTransaction(Uint8List unsignedTxBytes, Ed25519HDKeyPair keypair) async {
   final numSignatures = unsignedTxBytes[0];
   final messageOffset = 1 + (numSignatures * 64);
   final messageBytes = unsignedTxBytes.sublist(messageOffset);
 
-  // Sign the message
   final signature = await keypair.sign(messageBytes);
 
-  // Build signed transaction
   final signedTx = BytesBuilder();
   signedTx.addByte(numSignatures);
   signedTx.add(signature.bytes);
 
-  // Add any additional signatures (for multi-sig)
   for (var i = 1; i < numSignatures; i++) {
     signedTx.add(unsignedTxBytes.sublist(1 + (i * 64), 1 + ((i + 1) * 64)));
   }
@@ -477,18 +175,3 @@ Future<Uint8List> _signTransaction(Uint8List unsignedTxBytes, Ed25519HDKeyPair k
 
   return Uint8List.fromList(signedTx.toBytes());
 }
-
-class _AccountMeta {
-  final String pubkey;
-  final bool isSigner;
-  final bool isWriteable;
-
-  _AccountMeta({
-    required this.pubkey,
-    required this.isSigner,
-    required this.isWriteable,
-  });
-}
-
-
-
