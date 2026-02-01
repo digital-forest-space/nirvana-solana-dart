@@ -3,17 +3,16 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:solana/solana.dart';
 
+import 'package:nirvana_solana/src/nirvana/pda.dart';
+import 'package:nirvana_solana/src/models/config.dart';
+
 /// Verify Nirvana PDA derivation against known on-chain accounts.
 ///
 /// Usage: dart scripts/nirvana/verify_pda_derivation.dart [--rpc <url>] [--verbose]
 ///
-/// This script derives all singleton PDAs using our NirvanaPda seeds and
-/// compares them against the known accounts from config.dart and on-chain data.
-/// For user-specific PDAs, it uses a known user to verify derivation works.
-
-const _programId = 'NirvHuZvrm2zSxjkBvSbaF2tHfP5j7cvMj9QmdoHVwb';
-const _tenantAccount = 'BcAoCEdkzV2J21gAjCCEokBw5iMnAe96SbYo9F6QmKWV';
-const _priceCurve = 'Fx5u5BCTwpckbB6jBbs13nDsRabHb5bq2t2hBDszhSbd';
+/// This script derives all singleton and user-specific PDAs using our NirvanaPda
+/// class and compares them against the known accounts from config.dart and
+/// on-chain data.
 
 void main(List<String> args) async {
   final verbose = args.contains('--verbose');
@@ -23,42 +22,35 @@ void main(List<String> args) async {
       : Platform.environment['SOLANA_RPC_URL'] ??
           'https://api.mainnet-beta.solana.com';
 
-  final programKey = Ed25519HDPublicKey.fromBase58(_programId);
-  final tenantKey = Ed25519HDPublicKey.fromBase58(_tenantAccount);
+  final config = NirvanaConfig.mainnet();
+  final pda = NirvanaPda.mainnet();
+  final tenantKey = Ed25519HDPublicKey.fromBase58(config.tenantAccount);
 
   final results = <Map<String, dynamic>>[];
   var allMatch = true;
 
   // 1. Verify priceCurve PDA
   if (verbose) print('Deriving priceCurve PDA...');
-  final derivedPriceCurve = await Ed25519HDPublicKey.findProgramAddress(
-    seeds: ['price_curve'.codeUnits, tenantKey.bytes],
-    programId: programKey,
-  );
-  final priceCurveMatch = derivedPriceCurve.toBase58() == _priceCurve;
+  final derivedPriceCurve = await pda.priceCurve(tenant: tenantKey);
+  final priceCurveMatch = derivedPriceCurve.toBase58() == config.priceCurve;
   if (!priceCurveMatch) allMatch = false;
   results.add({
     'name': 'priceCurve',
-    'seeds': ['price_curve', _tenantAccount],
     'derived': derivedPriceCurve.toBase58(),
-    'expected': _priceCurve,
+    'expected': config.priceCurve,
     'match': priceCurveMatch,
   });
   if (verbose) {
     print('  Derived:  ${derivedPriceCurve.toBase58()}');
-    print('  Expected: $_priceCurve');
+    print('  Expected: ${config.priceCurve}');
     print('  Match:    $priceCurveMatch');
   }
 
   // 2. Verify curveBallot PDA (no known address, just check it derives)
   if (verbose) print('\nDeriving curveBallot PDA...');
-  final derivedCurveBallot = await Ed25519HDPublicKey.findProgramAddress(
-    seeds: ['curve_ballot'.codeUnits, tenantKey.bytes],
-    programId: programKey,
-  );
+  final derivedCurveBallot = await pda.curveBallot(tenant: tenantKey);
   results.add({
     'name': 'curveBallot',
-    'seeds': ['curve_ballot', _tenantAccount],
     'derived': derivedCurveBallot.toBase58(),
     'note': 'No known address to compare - checking on-chain existence',
   });
@@ -89,44 +81,45 @@ void main(List<String> args) async {
     }
   }
 
-  // 4. Try to find a known user's personalAccount via getProgramAccounts
-  // and verify it matches our PDA derivation
+  // 4. Find a known user's personalAccount via getProgramAccounts
+  // and verify it matches our NirvanaPda.personalAccount() derivation
   if (verbose) print('\nSearching for a user personalAccount to verify derivation...');
-  final programAccounts = await _getProgramAccounts(rpcUrl, _programId, 272, 8);
+  final programAccounts = await _getProgramAccounts(rpcUrl, config.programId, 272);
 
   if (programAccounts.isNotEmpty) {
-    // Take the first account and verify PDA derivation
     final account = programAccounts.first;
     final accountPubkey = account['pubkey'] as String;
-    final data = account['data'] as String; // base64
+    final data = account['data'] as String;
 
-    // Decode to get user pubkey (at offset 8, 32 bytes after discriminator)
     final bytes = base64Decode(data);
-    if (bytes.length >= 40) {
-      final userBytes = bytes.sublist(8, 40);
-      final userKey = Ed25519HDPublicKey(userBytes.toList());
-      final userPubkey = userKey.toBase58();
+    if (bytes.length >= 72) {
+      final ownerBytes = bytes.sublist(8, 40);
+      final ownerKey = Ed25519HDPublicKey(ownerBytes.toList());
+      final userPubkey = ownerKey.toBase58();
+
+      final onChainTenantBytes = bytes.sublist(40, 72);
+      final onChainTenantKey = Ed25519HDPublicKey(onChainTenantBytes.toList());
 
       if (verbose) {
         print('  Found account: $accountPubkey');
-        print('  User pubkey (from data): $userPubkey');
+        print('  Owner (offset 8):  $userPubkey');
+        print('  Tenant (offset 40): ${onChainTenantKey.toBase58()}');
+        if (onChainTenantKey.toBase58() != config.tenantAccount) {
+          print('  WARNING: on-chain tenant differs from config tenant (${config.tenantAccount})');
+        }
       }
 
-      // Derive personalAccount PDA for this user
-      final derivedPersonal = await Ed25519HDPublicKey.findProgramAddress(
-        seeds: [
-          'personal_position'.codeUnits,
-          tenantKey.bytes,
-          userKey.bytes,
-        ],
-        programId: programKey,
+      // Derive using the tenant stored in the account (not config)
+      final derivedPersonal = await pda.personalAccount(
+        tenant: onChainTenantKey,
+        owner: ownerKey,
       );
 
       final personalMatch = derivedPersonal.toBase58() == accountPubkey;
       if (!personalMatch) allMatch = false;
       results.add({
         'name': 'personalAccount',
-        'seeds': ['personal_position', _tenantAccount, userPubkey],
+        'user': userPubkey,
         'derived': derivedPersonal.toBase58(),
         'expected': accountPubkey,
         'match': personalMatch,
@@ -182,11 +175,7 @@ Future<Map<String, dynamic>?> _getAccountInfo(String rpcUrl, String pubkey) asyn
 }
 
 Future<List<Map<String, dynamic>>> _getProgramAccounts(
-    String rpcUrl, String programId, int dataSize, int? memcmpOffset) async {
-  final filters = <Map<String, dynamic>>[
-    {'dataSize': dataSize},
-  ];
-
+    String rpcUrl, String programId, int dataSize) async {
   final response = await http.post(
     Uri.parse(rpcUrl),
     headers: {'Content-Type': 'application/json'},
@@ -198,7 +187,9 @@ Future<List<Map<String, dynamic>>> _getProgramAccounts(
         programId,
         {
           'encoding': 'base64',
-          'filters': filters,
+          'filters': [
+            {'dataSize': dataSize},
+          ],
         },
       ],
     }),

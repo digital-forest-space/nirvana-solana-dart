@@ -68,10 +68,27 @@ void main(List<String> args) async {
   // Show current prices
   if (verbose) print('\nFetching current floor price...');
   final floorPrice = await client.fetchFloorPrice();
+  if (verbose) print('  Floor price: \$${floorPrice.toStringAsFixed(6)}');
+
+  // Check personal account status
+  if (verbose) print('\nChecking personal account...');
+  final personalAccount = await client.derivePersonalAccount(userPubkey);
+  if (verbose) print('  PDA: $personalAccount');
+  final personalAccountInfo = await client.getPersonalAccountInfo(userPubkey);
+  final needsInit = personalAccountInfo == null;
   if (verbose) {
-    print('  Floor price: \$${floorPrice.toStringAsFixed(6)}');
+    if (needsInit) {
+      print('  Status: not found — will initialize in same transaction');
+    } else {
+      print('  Status: exists');
+      print('  Staked ANA: ${personalAccountInfo.stakedAna.toStringAsFixed(6)}');
+    }
+  }
+
+  if (verbose) {
     print('\nTransaction:');
     print('  Staking: $anaAmount ANA');
+    if (needsInit) print('  Init: personal account will be created');
     print('\nExecuting stake transaction...');
   }
 

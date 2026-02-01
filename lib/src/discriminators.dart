@@ -23,7 +23,7 @@ class NirvanaDiscriminators {
   static const List<int> withdrawAna = [93, 87, 203, 252, 78, 187, 97, 82];
 
   /// `init_personal_account` — Create a user's personal account PDA.
-  static const List<int> initPersonalAccount = [161, 176, 40, 213, 71, 95, 78, 42];
+  static const List<int> initPersonalAccount = [104, 99, 107, 177, 104, 196, 189, 188];
 
   /// `borrow_nirv` — Borrow NIRV against staked ANA.
   static const List<int> borrowNirv = [155, 1, 43, 62, 79, 104, 66, 42];

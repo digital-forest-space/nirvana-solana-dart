@@ -1,5 +1,8 @@
+import 'package:solana/solana.dart';
+
 import '../rpc/solana_rpc_client.dart';
 import '../models/config.dart';
+import '../nirvana/pda.dart';
 
 /// Resolves and manages Nirvana-related accounts
 class NirvanaAccountResolver {
@@ -26,26 +29,29 @@ class NirvanaAccountResolver {
     );
   }
   
-  /// Find user's personal account (for staking/borrowing)
-  /// Queries program accounts with dataSize=272 and memcmp filter for user pubkey at offset 8
+  /// Derive user's personal account PDA address (for staking/borrowing).
+  /// Always returns a valid address — the PDA is deterministic regardless of
+  /// whether the account exists on-chain.
+  Future<String> derivePersonalAccount(String userPubkey) async {
+    final pda = NirvanaPda.mainnet();
+    final tenantKey = Ed25519HDPublicKey.fromBase58(_config.tenantAccount);
+    final ownerKey = Ed25519HDPublicKey.fromBase58(userPubkey);
+    final personalKey = await pda.personalAccount(
+      tenant: tenantKey,
+      owner: ownerKey,
+    );
+    return personalKey.toBase58();
+  }
+
+  /// Find user's personal account if it exists on-chain.
+  /// Uses deterministic PDA derivation + getAccountInfo existence check.
   Future<String?> findPersonalAccount(String userPubkey) async {
-    try {
-      final accounts = await _rpcClient.getProgramAccounts(
-        _config.programId,
-        dataSize: 272,  // PersonalAccount size
-        memcmpOffset: 8,  // Skip discriminator, match user pubkey at field 0
-        memcmpBytes: userPubkey,
-      );
-
-      if (accounts.isEmpty) {
-        return null;
-      }
-
-      return accounts.first['pubkey'] as String;
-    } catch (e) {
-      // Fallback to null if RPC call fails
+    final address = await derivePersonalAccount(userPubkey);
+    final accountInfo = await _rpcClient.getAccountInfo(address);
+    if (accountInfo.isEmpty || accountInfo['data'] == null) {
       return null;
     }
+    return address;
   }
   
   /// Get user's token balances

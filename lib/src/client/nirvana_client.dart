@@ -835,9 +835,8 @@ class NirvanaClient {
   
   /// Get user's personal account information
   Future<PersonalAccountInfo?> getPersonalAccountInfo(String userPubkey) async {
-    final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
-    if (personalAccount == null) return null;
-    
+    final personalAccount = await _accountResolver.derivePersonalAccount(userPubkey);
+
     try {
       final accountInfo = await _rpcClient.getAccountInfo(personalAccount);
       if (accountInfo.isEmpty || accountInfo['data'] == null) return null;
@@ -896,10 +895,11 @@ class NirvanaClient {
     return await _accountResolver.resolveUserAccounts(userPubkey);
   }
 
-  /// Find user's personal account address (for staking/borrowing/claiming)
-  /// Returns null if the user has never staked
-  Future<String?> findPersonalAccount(String userPubkey) async {
-    return await _accountResolver.findPersonalAccount(userPubkey);
+  /// Derive user's personal account PDA address (for staking/borrowing/claiming).
+  /// Always returns a valid address — the PDA is deterministic.
+  /// Use getAccountInfo to check if the account exists on-chain.
+  Future<String> derivePersonalAccount(String userPubkey) async {
+    return await _accountResolver.derivePersonalAccount(userPubkey);
   }
 
   /// Get a recent blockhash for transaction construction
@@ -915,8 +915,9 @@ class NirvanaClient {
   /// This gives the exact amount the protocol calculates.
   Future<double> getClaimablePrana(String userPubkey) async {
     // Get user's personal account
-    final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
-    if (personalAccount == null) {
+    final personalAccount = await _accountResolver.derivePersonalAccount(userPubkey);
+    final personalAccountInfo = await _rpcClient.getAccountInfo(personalAccount);
+    if (personalAccountInfo.isEmpty || personalAccountInfo['data'] == null) {
       return 0.0;
     }
 
@@ -1000,8 +1001,9 @@ class NirvanaClient {
   /// Returns a map with 'ANA' and 'NIRV' claimable amounts.
   Future<Map<String, double>> getClaimableRevshare(String userPubkey) async {
     // Get user's personal account
-    final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
-    if (personalAccount == null) {
+    final personalAccount = await _accountResolver.derivePersonalAccount(userPubkey);
+    final personalAccountInfo = await _rpcClient.getAccountInfo(personalAccount);
+    if (personalAccountInfo.isEmpty || personalAccountInfo['data'] == null) {
       return {'ANA': 0.0, 'NIRV': 0.0};
     }
 
@@ -1039,8 +1041,9 @@ class NirvanaClient {
   /// Returns a map with 'ANA' and 'NIRV' claimable amounts.
   Future<Map<String, double>> getClaimableRevshareViaSimulation(String userPubkey) async {
     // Get user's personal account
-    final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
-    if (personalAccount == null) {
+    final personalAccount = await _accountResolver.derivePersonalAccount(userPubkey);
+    final personalAccountInfo = await _rpcClient.getAccountInfo(personalAccount);
+    if (personalAccountInfo.isEmpty || personalAccountInfo['data'] == null) {
       return {'ANA': 0.0, 'NIRV': 0.0};
     }
 
@@ -1853,28 +1856,47 @@ class NirvanaClient {
 
   /// Build unsigned stake ANA transaction for MWA signing
   ///
-  /// Returns serialized transaction bytes ready for wallet signing
+  /// Returns serialized transaction bytes ready for wallet signing.
   ///
-  /// Note: Requires PersonalAccount to already exist. Use stakeAna() for
-  /// automatic PersonalAccount initialization.
+  /// If [personalAccount] is not provided, it is derived via PDA.
+  /// If [needsInit] is true, an init_personal_account instruction is prepended.
+  /// If [needsInit] is null (default), existence is auto-detected via getAccountInfo.
   Future<Uint8List> buildUnsignedStakeAnaTransaction({
     required String userPubkey,
     required double anaAmount,
     required NirvanaUserAccounts userAccounts,
-    required String personalAccount,
     required String recentBlockhash,
+    String? personalAccount,
+    bool? needsInit,
   }) async {
-    final instruction = _buildStakeAnaInstruction(
+    final resolvedPersonalAccount = personalAccount ??
+        await _accountResolver.derivePersonalAccount(userPubkey);
+
+    if (needsInit == null) {
+      final accountInfo = await _rpcClient.getAccountInfo(resolvedPersonalAccount);
+      needsInit = accountInfo.isEmpty || accountInfo['data'] == null;
+    }
+
+    final stakeInstruction = _buildStakeAnaInstruction(
       userPubkey: userPubkey,
       anaAmount: anaAmount,
       userAccounts: userAccounts,
-      personalAccount: personalAccount,
+      personalAccount: resolvedPersonalAccount,
     );
+
+    final instructions = <Instruction>[
+      if (needsInit)
+        _transactionBuilder.buildInitPersonalAccountInstruction(
+          userPubkey: userPubkey,
+          personalAccount: resolvedPersonalAccount,
+        ),
+      stakeInstruction,
+    ];
 
     final blockhash = recentBlockhash;
 
     // Build and compile message
-    final message = Message(instructions: [instruction]);
+    final message = Message(instructions: instructions);
     final feePayer = Ed25519HDPublicKey.fromBase58(userPubkey);
     final compiledMessage = message.compile(
       recentBlockhash: blockhash,
@@ -1892,32 +1914,39 @@ class NirvanaClient {
   }
 
   /// Stake ANA tokens
+  ///
+  /// Automatically initializes the user's personal account if it doesn't exist.
   Future<TransactionResult> stakeAna({
     required String userPubkey,
     required Ed25519HDKeyPair keypair,
     required double anaAmount,
   }) async {
     try {
-      // Find personal account
-      var personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
-      if (personalAccount == null) {
-        // Initialize personal account first
-        personalAccount = await initializePersonalAccount(
-          userPubkey: userPubkey,
-          keypair: keypair,
-        );
-      }
+      final personalAccount = await _accountResolver.derivePersonalAccount(userPubkey);
+
+      // Check if personal account exists on-chain
+      final accountInfo = await _rpcClient.getAccountInfo(personalAccount);
+      final needsInit = accountInfo.isEmpty || accountInfo['data'] == null;
 
       final accounts = await _accountResolver.resolveUserAccounts(userPubkey);
-      final instruction = _buildStakeAnaInstruction(
+      final stakeInstruction = _buildStakeAnaInstruction(
         userPubkey: userPubkey,
         anaAmount: anaAmount,
         userAccounts: accounts,
         personalAccount: personalAccount,
       );
 
+      final instructions = <Instruction>[
+        if (needsInit)
+          _transactionBuilder.buildInitPersonalAccountInstruction(
+            userPubkey: userPubkey,
+            personalAccount: personalAccount,
+          ),
+        stakeInstruction,
+      ];
+
       // Create and send transaction
-      final message = Message(instructions: [instruction]);
+      final message = Message(instructions: instructions);
       final signature = await _rpcClient.sendAndConfirmTransaction(
         message: message,
         signers: [keypair],
@@ -1940,22 +1969,20 @@ class NirvanaClient {
     required String userPubkey,
     required Ed25519HDKeyPair keypair,
   }) async {
-    // Derive personal account PDA
-    // TODO: Implement proper PDA derivation
-    const String tempPersonalAccount = 'TempPersonalAccountAddress'; // Placeholder
-    
+    final personalAccount = await _accountResolver.derivePersonalAccount(userPubkey);
+
     final instruction = _transactionBuilder.buildInitPersonalAccountInstruction(
       userPubkey: userPubkey,
-      personalAccount: tempPersonalAccount,
+      personalAccount: personalAccount,
     );
-    
+
     final message = Message(instructions: [instruction]);
     await _rpcClient.sendAndConfirmTransaction(
       message: message,
       signers: [keypair],
     );
-    
-    return tempPersonalAccount;
+
+    return personalAccount;
   }
   
   /// Shared helper to build borrow NIRV instruction
@@ -2027,8 +2054,9 @@ class NirvanaClient {
     required double nirvAmount,
   }) async {
     try {
-      final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
-      if (personalAccount == null) {
+      final personalAccount = await _accountResolver.derivePersonalAccount(userPubkey);
+      final personalAccountInfo = await _rpcClient.getAccountInfo(personalAccount);
+      if (personalAccountInfo.isEmpty || personalAccountInfo['data'] == null) {
         throw Exception('PersonalAccount not found. You need to stake ANA first.');
       }
       final accounts = await _accountResolver.resolveUserAccounts(userPubkey);
@@ -2127,8 +2155,9 @@ class NirvanaClient {
     required double anaAmount,
   }) async {
     try {
-      final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
-      if (personalAccount == null) {
+      final personalAccount = await _accountResolver.derivePersonalAccount(userPubkey);
+      final personalAccountInfo = await _rpcClient.getAccountInfo(personalAccount);
+      if (personalAccountInfo.isEmpty || personalAccountInfo['data'] == null) {
         throw Exception('PersonalAccount not found. You need to have staked tokens first.');
       }
       final accounts = await _accountResolver.resolveUserAccounts(userPubkey);
@@ -2237,8 +2266,9 @@ class NirvanaClient {
     required Ed25519HDKeyPair keypair,
   }) async {
     try {
-      final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
-      if (personalAccount == null) {
+      final personalAccount = await _accountResolver.derivePersonalAccount(userPubkey);
+      final personalAccountInfo = await _rpcClient.getAccountInfo(personalAccount);
+      if (personalAccountInfo.isEmpty || personalAccountInfo['data'] == null) {
         throw Exception('User does not have a personal account (must stake first)');
       }
       final accounts = await _accountResolver.resolveUserAccounts(userPubkey);
@@ -2334,8 +2364,9 @@ class NirvanaClient {
     required Ed25519HDKeyPair keypair,
   }) async {
     try {
-      final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
-      if (personalAccount == null) {
+      final personalAccount = await _accountResolver.derivePersonalAccount(userPubkey);
+      final personalAccountInfo = await _rpcClient.getAccountInfo(personalAccount);
+      if (personalAccountInfo.isEmpty || personalAccountInfo['data'] == null) {
         throw Exception('User does not have a personal account (must stake first)');
       }
       final accounts = await _accountResolver.resolveUserAccounts(userPubkey);
@@ -2434,8 +2465,9 @@ class NirvanaClient {
     required double nirvAmount,
   }) async {
     try {
-      final personalAccount = await _accountResolver.findPersonalAccount(userPubkey);
-      if (personalAccount == null) {
+      final personalAccount = await _accountResolver.derivePersonalAccount(userPubkey);
+      final personalAccountInfo = await _rpcClient.getAccountInfo(personalAccount);
+      if (personalAccountInfo.isEmpty || personalAccountInfo['data'] == null) {
         throw Exception('User does not have a personal account. Cannot repay without borrowed position.');
       }
       final accounts = await _accountResolver.resolveUserAccounts(userPubkey);

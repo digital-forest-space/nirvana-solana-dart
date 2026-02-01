@@ -199,12 +199,14 @@ class NirvanaTransactionBuilder {
   }) {
     const discriminator = NirvanaDiscriminators.initPersonalAccount;
     
-    // Build accounts
+    // Accounts: [payer, tenant, owner, personalAccount, systemProgram]
+    // payer and owner are both the user but listed as separate entries
     final accounts = [
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userPubkey), isSigner: true, isWriteable: true),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.tenantAccount), isSigner: false, isWriteable: false),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(personalAccount), isSigner: false, isWriteable: true),
-      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58('11111111111111111111111111111111'), isSigner: false, isWriteable: false), // System program
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userPubkey), isSigner: true, isWriteable: true),   // payer
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(_config.tenantAccount), isSigner: false, isWriteable: false), // tenant
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(userPubkey), isSigner: false, isWriteable: false), // owner
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58(personalAccount), isSigner: false, isWriteable: true), // personalAccount
+      AccountMeta(pubKey: Ed25519HDPublicKey.fromBase58('11111111111111111111111111111111'), isSigner: false, isWriteable: false), // systemProgram
     ];
     
     return Instruction(
