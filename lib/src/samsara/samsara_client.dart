@@ -1,9 +1,14 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:solana/solana.dart';
+import 'package:solana/encoder.dart';
+
 import '../models/transaction_price_result.dart';
 import '../rpc/solana_rpc_client.dart';
 import 'config.dart';
+import 'pda.dart';
+import 'transaction_builder.dart';
 
 /// Client for fetching data from Samsara protocol (navTokens)
 class SamsaraClient {
@@ -324,5 +329,80 @@ class SamsaraClient {
     }
 
     return totalChange;
+  }
+
+  /// Build an unsigned deposit prANA transaction for a Samsara market.
+  ///
+  /// Automatically initializes the govAccount if it doesn't exist yet.
+  /// Returns serialized transaction bytes ready for wallet signing.
+  Future<Uint8List> buildUnsignedDepositPranaTransaction({
+    required String userPubkey,
+    required NavTokenMarket market,
+    required double pranaAmount,
+    required String recentBlockhash,
+  }) async {
+    final pda = SamsaraPda(
+        Ed25519HDPublicKey.fromBase58(_config.samsaraProgramId));
+    final txBuilder = SamsaraTransactionBuilder(config: _config);
+
+    // 1. Derive PDAs
+    final samsaraMarketKey =
+        Ed25519HDPublicKey.fromBase58(market.samsaraMarket);
+    final ownerKey = Ed25519HDPublicKey.fromBase58(userPubkey);
+    final govAccount = await pda.personalGovAccount(
+        market: samsaraMarketKey, owner: ownerKey);
+    final pranaEscrow =
+        await pda.personalGovPranaEscrow(govAccount: govAccount);
+    final logCounter = await pda.logCounter();
+
+    // 2. Check if govAccount exists on-chain
+    final govAccountInfo =
+        await _rpcClient.getAccountInfo(govAccount.toBase58());
+    final needsInit =
+        govAccountInfo.isEmpty || govAccountInfo['data'] == null;
+
+    // 3. Find user's prANA ATA
+    final pranaSrc = await _rpcClient.getAssociatedTokenAddress(
+        userPubkey, _config.pranaMint);
+
+    // 4. Build instruction list
+    final instructions = <Instruction>[
+      txBuilder.buildSetComputeUnitLimitInstruction(200000),
+      txBuilder.buildSetComputeUnitPriceInstruction(50000),
+    ];
+
+    if (needsInit) {
+      instructions.add(txBuilder.buildInitGovAccountInstruction(
+        payerPubkey: userPubkey,
+        ownerPubkey: userPubkey,
+        market: market,
+        govAccount: govAccount.toBase58(),
+        pranaEscrow: pranaEscrow.toBase58(),
+        logCounter: logCounter.toBase58(),
+      ));
+    }
+
+    final pranaLamports = (pranaAmount * 1e6).round(); // prANA has 6 decimals
+    instructions.add(txBuilder.buildDepositPranaInstruction(
+      depositorPubkey: userPubkey,
+      market: market,
+      govAccount: govAccount.toBase58(),
+      pranaSrc: pranaSrc,
+      pranaEscrow: pranaEscrow.toBase58(),
+      logCounter: logCounter.toBase58(),
+      amount: pranaLamports,
+    ));
+
+    // 5. Compile and return unsigned tx
+    final message = Message(instructions: instructions);
+    final feePayer = Ed25519HDPublicKey.fromBase58(userPubkey);
+    final compiledMessage = message.compile(
+      recentBlockhash: recentBlockhash,
+      feePayer: feePayer,
+    );
+    final signature = Signature(List.filled(64, 0), publicKey: feePayer);
+    final signedTx = SignedTx(
+        compiledMessage: compiledMessage, signatures: [signature]);
+    return Uint8List.fromList(signedTx.toByteArray().toList());
   }
 }

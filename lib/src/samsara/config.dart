@@ -8,6 +8,9 @@ class SamsaraConfig {
   final String mayflowerTenant;
   final String samsaraTenant;
 
+  // Mints
+  final String pranaMint;
+
   // System programs
   final String tokenProgram;
   final String associatedTokenProgram;
@@ -19,6 +22,7 @@ class SamsaraConfig {
     required this.mayflowerProgramId,
     required this.mayflowerTenant,
     required this.samsaraTenant,
+    required this.pranaMint,
     required this.tokenProgram,
     required this.associatedTokenProgram,
     required this.systemProgram,
@@ -30,7 +34,8 @@ class SamsaraConfig {
       samsaraProgramId: 'SAMmdq34d9RJoqoqfnGhMRUvZumQriaT55eGzXeAQj7',
       mayflowerProgramId: 'AVMmmRzwc2kETQNhPiFVnyu62HrgsQXTD6D7SnSfEz7v',
       mayflowerTenant: '81JEJdJSZbaXixpD8WQSBWBfkDa6m6KpXpSErzYUHq6z',
-      samsaraTenant: 'FvLdBhqeSJktfcUGq5S4mpNAiTYg2hUhto8AHzjqskFC',
+      samsaraTenant: 'FvLdBhqeSJktfcUGq5S4mpNAiTYg2hUhto8AHzjqskTC',
+      pranaMint: 'CLr7G2af9VSfH1PFZ5fYvB8WK1DTgE85qrVjpa8Xkg4N',
       tokenProgram: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
       associatedTokenProgram: 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
       systemProgram: '11111111111111111111111111111111',

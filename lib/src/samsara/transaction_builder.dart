@@ -348,6 +348,182 @@ class SamsaraTransactionBuilder {
     );
   }
 
+  /// Build Samsara init_gov_account instruction
+  ///
+  /// Creates a user's governance account for a specific Samsara market.
+  /// Must be called before the first depositPrana for a given market+owner pair.
+  Instruction buildInitGovAccountInstruction({
+    required String payerPubkey,
+    required String ownerPubkey,
+    required NavTokenMarket market,
+    required String govAccount,
+    required String pranaEscrow,
+    required String logCounter,
+  }) {
+    final accounts = [
+      // 0: payer (signer, writable)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(payerPubkey),
+        isSigner: true,
+        isWriteable: true,
+      ),
+      // 1: owner (writable)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(ownerPubkey),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 2: tenant (readonly)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(_config.samsaraTenant),
+        isSigner: false,
+        isWriteable: false,
+      ),
+      // 3: mintPrana (readonly)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(_config.pranaMint),
+        isSigner: false,
+        isWriteable: false,
+      ),
+      // 4: market (readonly)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(market.samsaraMarket),
+        isSigner: false,
+        isWriteable: false,
+      ),
+      // 5: pranaEscrow (writable) -- PDA
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(pranaEscrow),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 6: govAccount (writable) -- PDA
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(govAccount),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 7: tokenProgram (readonly)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(_config.tokenProgram),
+        isSigner: false,
+        isWriteable: false,
+      ),
+      // 8: systemProgram (readonly)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(_config.systemProgram),
+        isSigner: false,
+        isWriteable: false,
+      ),
+      // 9: samLogCounter (writable) -- PDA
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(logCounter),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 10: samsaraProgram (readonly)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(_config.samsaraProgramId),
+        isSigner: false,
+        isWriteable: false,
+      ),
+    ];
+
+    return Instruction(
+      programId: Ed25519HDPublicKey.fromBase58(_config.samsaraProgramId),
+      accounts: accounts,
+      data: ByteArray(Uint8List.fromList(NirvanaDiscriminators.initGovAccount)),
+    );
+  }
+
+  /// Build Samsara deposit_prana instruction
+  ///
+  /// Deposits prANA tokens into a market's governance account.
+  /// The govAccount must already exist (call initGovAccount first).
+  Instruction buildDepositPranaInstruction({
+    required String depositorPubkey,
+    required NavTokenMarket market,
+    required String govAccount,
+    required String pranaSrc,
+    required String pranaEscrow,
+    required String logCounter,
+    required int amount,
+  }) {
+    // Instruction data: discriminator (8 bytes) + amount (u64 LE, 8 bytes)
+    final data = Uint8List(16);
+    data.setAll(0, NirvanaDiscriminators.depositPrana);
+    data.buffer.asByteData().setUint64(8, amount, Endian.little);
+
+    final accounts = [
+      // 0: depositor (signer, writable)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(depositorPubkey),
+        isSigner: true,
+        isWriteable: true,
+      ),
+      // 1: tenant (readonly)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(_config.samsaraTenant),
+        isSigner: false,
+        isWriteable: false,
+      ),
+      // 2: market (writable)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(market.samsaraMarket),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 3: govAccount (writable) -- PDA
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(govAccount),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 4: mintPrana (readonly)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(_config.pranaMint),
+        isSigner: false,
+        isWriteable: false,
+      ),
+      // 5: pranaSrc (writable) -- user's prANA token account
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(pranaSrc),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 6: pranaEscrow (writable) -- PDA
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(pranaEscrow),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 7: tokenProgram (readonly)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(_config.tokenProgram),
+        isSigner: false,
+        isWriteable: false,
+      ),
+      // 8: samLogCounter (writable) -- PDA
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(logCounter),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 9: samsaraProgram (readonly)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(_config.samsaraProgramId),
+        isSigner: false,
+        isWriteable: false,
+      ),
+    ];
+
+    return Instruction(
+      programId: Ed25519HDPublicKey.fromBase58(_config.samsaraProgramId),
+      accounts: accounts,
+      data: ByteArray(data),
+    );
+  }
+
   /// Build CreateAssociatedTokenAccountIdempotent instruction
   Instruction buildCreateAtaIdempotentInstruction({
     required String payer,

@@ -62,6 +62,15 @@ class NirvanaDiscriminators {
   /// `buy` (BuyWithExactCashInAndDeposit) — Buy navToken with base token.
   static const List<int> buyNavToken = [30, 205, 124, 67, 20, 142, 236, 136];
 
+  /// `deposit_prana` — Deposit prANA to a market's govAccount.
+  static const List<int> depositPrana = [167, 25, 30, 117, 67, 213, 8, 210];
+
+  /// `withdraw_prana` — Withdraw prANA from a market's govAccount.
+  static const List<int> withdrawPrana = [82, 134, 30, 249, 3, 225, 239, 26];
+
+  /// `init_gov_account` — Initialize a user's govAccount for a market.
+  static const List<int> initGovAccount = [16, 49, 201, 21, 187, 43, 241, 78];
+
   /// All Nirvana V2 protocol discriminators keyed by instruction name.
   static const Map<String, List<int>> nirvana = {
     'buy_exact2': buyExact2,
@@ -83,6 +92,9 @@ class NirvanaDiscriminators {
   static const Map<String, List<int>> samsara = {
     'init_personal_position': initPersonalPosition,
     'buy': buyNavToken,
+    'deposit_prana': depositPrana,
+    'withdraw_prana': withdrawPrana,
+    'init_gov_account': initGovAccount,
   };
 
   /// Every discriminator across both protocols.
