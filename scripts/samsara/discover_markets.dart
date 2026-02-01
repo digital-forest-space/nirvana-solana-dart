@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:solana/solana.dart';
 import 'package:nirvana_solana/src/samsara/config.dart';
+import 'package:nirvana_solana/src/samsara/pda.dart';
 import 'package:nirvana_solana/src/rpc/solana_rpc_client.dart';
 
 /// Discover all Samsara navToken markets from on-chain data.
@@ -48,6 +49,7 @@ void main(List<String> args) async {
   );
   final rpcClient = DefaultSolanaRpcClient(solanaClient, rpcUrl: uri);
   final config = SamsaraConfig.mainnet();
+  final pda = SamsaraPda.mainnet();
 
   if (verbose) print('Fetching all Mayflower Market accounts...\n');
 
@@ -84,8 +86,14 @@ void main(List<String> args) async {
     allMints.add(navMint);
     allMints.add(baseMint);
 
+    // Derive Samsara market address from marketMetadata PDA
+    final samsaraMarket = await pda.market(
+      marketMeta: Ed25519HDPublicKey.fromBase58(metadataPubkey),
+    );
+
     results.add({
       'mayflowerMarket': mayflowerPubkey,
+      'samsaraMarket': samsaraMarket.toBase58(),
       'marketMetadata': metadataPubkey,
       'baseMint': baseMint,
       'navMint': navMint,
@@ -95,6 +103,12 @@ void main(List<String> args) async {
       'feeVault': feeVault,
       'floorPrice': floorPrice,
     });
+  }
+
+  // Build lookup of configured markets by navMint for comparison
+  final configByNavMint = <String, NavTokenMarket>{};
+  for (final m in NavTokenMarket.all.values) {
+    configByNavMint[m.navMint] = m;
   }
 
   // Resolve Metaplex token metadata for all mints
@@ -114,6 +128,31 @@ void main(List<String> args) async {
     if (baseMeta != null) {
       m['baseName'] = baseMeta['name'];
       m['baseSymbol'] = baseMeta['symbol'];
+    }
+  }
+
+  // Check each market against library config
+  for (final m in results) {
+    final navMint = m['navMint'] as String;
+    final cfg = configByNavMint[navMint];
+    m['supported'] = cfg != null;
+
+    if (cfg != null) {
+      final mismatches = <String>[];
+      if (cfg.mayflowerMarket != m['mayflowerMarket']) mismatches.add('mayflowerMarket');
+      if (cfg.samsaraMarket != m['samsaraMarket']) mismatches.add('samsaraMarket');
+      if (cfg.marketMetadata != m['marketMetadata']) mismatches.add('marketMetadata');
+      if (cfg.baseMint != m['baseMint']) mismatches.add('baseMint');
+      if (cfg.marketGroup != m['marketGroup']) mismatches.add('marketGroup');
+      if (cfg.marketSolVault != m['baseVault']) mismatches.add('baseVault');
+      if (cfg.marketNavVault != m['navVault']) mismatches.add('navVault');
+      if (cfg.feeVault != m['feeVault']) mismatches.add('feeVault');
+      m['configMatch'] = mismatches.isEmpty;
+      if (mismatches.isNotEmpty) {
+        m['configMismatches'] = mismatches;
+      }
+    } else {
+      m['configMatch'] = null;
     }
   }
 
@@ -148,6 +187,7 @@ void main(List<String> args) async {
         print('  Base Token:       ${m['baseName']} (${m['baseSymbol']})');
       }
       print('  Mayflower Market: ${m['mayflowerMarket']}');
+      print('  Samsara Market:   ${m['samsaraMarket']}');
       print('  Market Metadata:  ${m['marketMetadata']}');
       print('  Base Mint:        ${m['baseMint']}');
       print('  Nav Mint:         ${m['navMint']}');
@@ -155,6 +195,17 @@ void main(List<String> args) async {
       print('  Base Vault:       ${m['baseVault']}');
       print('  Nav Vault:        ${m['navVault']}');
       print('  Fee Vault:        ${m['feeVault']}');
+      final supported = m['supported'] as bool;
+      final configMatch = m['configMatch'];
+      print('  Supported:        $supported');
+      if (supported) {
+        if (configMatch == true) {
+          print('  Config Match:     true');
+        } else {
+          final mismatches = m['configMismatches'] as List<String>? ?? [];
+          print('  Config Match:     FALSE -- mismatches: ${mismatches.join(", ")}');
+        }
+      }
       if (health) {
         final supply = m['navSupply'];
         final vaultBal = m['baseVaultBalance'];

@@ -129,7 +129,7 @@ class NavTokenMarket {
       baseName: 'cbBTC',
       baseMint: 'cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij',
       navMint: 'navB4nQ2ENP18CCo1Jqw9bbLncLBC389Rf3XRCQ6zau',
-      samsaraMarket: '', // TODO: Discover from interception
+      samsaraMarket: 'E9xCJujXkNBmeJ7ds1AcKhAEHuGw6E874S6XTUU5PB4Q',
       mayflowerMarket: '3WNH5EArcmVDJzi4KtaX75WiSY65mqT735GEEvqnFJ6B',
       marketMetadata: 'rQL153FrAAcepv1exoemsf9WEsC2uJaajBaaWCykvnK',
       marketGroup: 'AXJJT2A7pUAzFKaRWzGgSN9fr9sEvKdGiqbJjdyYQbqj',
@@ -150,7 +150,7 @@ class NavTokenMarket {
       baseName: 'WETH',
       baseMint: '7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs',
       navMint: 'navEgA7saxpNqKcnJcWbCeCFMhSQtN8hQWQkK4h9scH',
-      samsaraMarket: '', // TODO: Discover from interception
+      samsaraMarket: 'HMkKNuq948jBmevDZAm3kG67edF9Hc2YacNHkfeBC4SP',
       mayflowerMarket: '3AwyQgXuhQAFzMaw17V42EW2htwZknr11grEGddvZEUh',
       marketMetadata: 'XAJvRwx5PmCgCYjsKMSoSrL6MZXJtWC6dwgndFvE1uu',
       marketGroup: '72ECyHwnmmRCMrm2BuTKVgLdPSKHhDx5sNGFDYDwN8ym',
