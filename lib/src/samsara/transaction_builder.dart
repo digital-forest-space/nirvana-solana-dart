@@ -247,6 +247,158 @@ class SamsaraTransactionBuilder {
     );
   }
 
+  /// Build Mayflower sell instruction for navSOL (SellWithExactTokenIn)
+  ///
+  /// Sells navToken for base token. The full transaction also requires:
+  /// 1. ComputeBudget instructions (set units and price)
+  /// 2. Create wSOL ATA (AssociatedToken idempotent) - for receiving output
+  /// 3. Transfer 0 SOL to wSOL ATA (ensure account exists)
+  /// 4. SyncNative on wSOL (Token program)
+  /// 5. Create navSOL ATA (AssociatedToken idempotent)
+  /// 6. THIS INSTRUCTION (Mayflower sell)
+  /// 7. Close wSOL account (Token program - unwrap to native SOL)
+  Instruction buildSellNavSolInstruction({
+    required String userPubkey,
+    required String userWsolAccount,
+    required String userNavSolAccount,
+    required String personalPosition,
+    required String userShares,
+    required String logAccount,
+    required NavTokenMarket market,
+    required int inputNavLamports,
+    int minOutputLamports = 0,
+  }) {
+    // Build instruction data: discriminator + input amount + min output
+    final inputBytes = Uint8List(8);
+    inputBytes.buffer.asByteData().setUint64(0, inputNavLamports, Endian.little);
+    final minOutputBytes = Uint8List(8);
+    minOutputBytes.buffer.asByteData().setUint64(0, minOutputLamports, Endian.little);
+
+    final instructionData = [
+      ...NirvanaDiscriminators.sellNavToken,
+      ...inputBytes,
+      ...minOutputBytes,
+    ];
+
+    // Build accounts in exact order from intercepted sell transaction (18 accounts)
+    final accounts = [
+      // 0: User Wallet (signer)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(userPubkey),
+        isSigner: true,
+        isWriteable: true,
+      ),
+      // 1: Mayflower Tenant
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(_config.mayflowerTenant),
+        isSigner: false,
+        isWriteable: false,
+      ),
+      // 2: Market Group
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(market.marketGroup),
+        isSigner: false,
+        isWriteable: false,
+      ),
+      // 3: Market Metadata
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(market.marketMetadata),
+        isSigner: false,
+        isWriteable: false,
+      ),
+      // 4: Mayflower Market (writable)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(market.mayflowerMarket),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 5: personal_position PDA (writable)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(personalPosition),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 6: Market Base Vault (SOL vault, writable)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(market.marketSolVault),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 7: Market navToken Vault (writable)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(market.marketNavVault),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 8: Fee Vault (writable)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(market.feeVault),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 9: navToken Mint (writable - burn)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(market.navMint),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 10: Base Token Mint (wSOL)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(market.baseMint),
+        isSigner: false,
+        isWriteable: false,
+      ),
+      // 11: User wSOL ATA (output destination, writable)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(userWsolAccount),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 12: User navToken ATA (input source, writable)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(userNavSolAccount),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 13: user_shares PDA (writable)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(userShares),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 14: Token Program
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(_config.tokenProgram),
+        isSigner: false,
+        isWriteable: false,
+      ),
+      // 15: Token Program (duplicate)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(_config.tokenProgram),
+        isSigner: false,
+        isWriteable: false,
+      ),
+      // 16: Mayflower log account (writable)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(logAccount),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 17: Mayflower Program
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(_config.mayflowerProgramId),
+        isSigner: false,
+        isWriteable: false,
+      ),
+    ];
+
+    return Instruction(
+      programId: Ed25519HDPublicKey.fromBase58(_config.mayflowerProgramId),
+      accounts: accounts,
+      data: ByteArray(Uint8List.fromList(instructionData)),
+    );
+  }
+
   /// Build ComputeBudget SetComputeUnitLimit instruction
   Instruction buildSetComputeUnitLimitInstruction(int units) {
     // Instruction type 2 = SetComputeUnitLimit

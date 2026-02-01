@@ -62,6 +62,9 @@ class NirvanaDiscriminators {
   /// `buy` (BuyWithExactCashInAndDeposit) — Buy navToken with base token.
   static const List<int> buyNavToken = [30, 205, 124, 67, 20, 142, 236, 136];
 
+  /// `sell` (SellWithExactTokenIn) — Sell navToken for base token.
+  static const List<int> sellNavToken = [223, 239, 212, 254, 255, 120, 53, 1];
+
   /// `deposit_prana` — Deposit prANA to a market's govAccount.
   static const List<int> depositPrana = [167, 25, 30, 117, 67, 213, 8, 210];
 
@@ -92,6 +95,7 @@ class NirvanaDiscriminators {
   static const Map<String, List<int>> samsara = {
     'init_personal_position': initPersonalPosition,
     'buy': buyNavToken,
+    'sell': sellNavToken,
     'deposit_prana': depositPrana,
     'withdraw_prana': withdrawPrana,
     'init_gov_account': initGovAccount,

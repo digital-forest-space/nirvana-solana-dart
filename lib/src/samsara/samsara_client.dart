@@ -526,4 +526,108 @@ class SamsaraClient {
         compiledMessage: compiledMessage, signatures: [signature]);
     return Uint8List.fromList(signedTx.toByteArray().toList());
   }
+
+  /// Build an unsigned sell navToken transaction for a Mayflower market.
+  ///
+  /// Sells navToken for base token (SOL). Creates a temporary wSOL account
+  /// to receive the output, then closes it to unwrap back to native SOL.
+  /// The user must already have a personal position (i.e., have bought before).
+  ///
+  /// Returns serialized transaction bytes ready for wallet signing.
+  Future<Uint8List> buildUnsignedSellNavSolTransaction({
+    required String userPubkey,
+    required NavTokenMarket market,
+    required int inputNavLamports,
+    required String recentBlockhash,
+    int minOutputLamports = 0,
+    int computeUnitLimit = 400000,
+    int computeUnitPrice = 280000,
+  }) async {
+    final mayflowerPda = MayflowerPda(
+        Ed25519HDPublicKey.fromBase58(_config.mayflowerProgramId));
+    final txBuilder = SamsaraTransactionBuilder(config: _config);
+
+    // 1. Derive user ATAs
+    final userWsolAta = await _rpcClient.getAssociatedTokenAddress(
+        userPubkey, market.baseMint);
+    final userNavAta = await _rpcClient.getAssociatedTokenAddress(
+        userPubkey, market.navMint);
+
+    // 2. Derive Mayflower PDAs
+    final marketMetaKey =
+        Ed25519HDPublicKey.fromBase58(market.marketMetadata);
+    final ownerKey = Ed25519HDPublicKey.fromBase58(userPubkey);
+    final personalPositionKey = await mayflowerPda.personalPosition(
+        marketMeta: marketMetaKey, owner: ownerKey);
+    final userSharesKey = await mayflowerPda.personalPositionEscrow(
+        personalPosition: personalPositionKey);
+    final logAccount = (await mayflowerPda.logAccount()).toBase58();
+
+    final personalPosition = personalPositionKey.toBase58();
+    final userShares = userSharesKey.toBase58();
+
+    // 3. Build instruction list
+    final instructions = <Instruction>[
+      txBuilder.buildSetComputeUnitLimitInstruction(computeUnitLimit),
+      txBuilder.buildSetComputeUnitPriceInstruction(computeUnitPrice),
+
+      // Create wSOL ATA (idempotent) - for receiving sell output
+      txBuilder.buildCreateAtaIdempotentInstruction(
+        payer: userPubkey,
+        associatedTokenAccount: userWsolAta,
+        owner: userPubkey,
+        mint: market.baseMint,
+      ),
+
+      // Transfer 0 lamports to wSOL ATA (ensure account exists)
+      txBuilder.buildTransferInstruction(
+        from: userPubkey,
+        to: userWsolAta,
+        lamports: 0,
+      ),
+
+      // Sync native (activate wSOL)
+      txBuilder.buildSyncNativeInstruction(userWsolAta),
+
+      // Create navToken ATA (idempotent)
+      txBuilder.buildCreateAtaIdempotentInstruction(
+        payer: userPubkey,
+        associatedTokenAccount: userNavAta,
+        owner: userPubkey,
+        mint: market.navMint,
+      ),
+
+      // Mayflower sell navToken
+      txBuilder.buildSellNavSolInstruction(
+        userPubkey: userPubkey,
+        userWsolAccount: userWsolAta,
+        userNavSolAccount: userNavAta,
+        personalPosition: personalPosition,
+        userShares: userShares,
+        logAccount: logAccount,
+        market: market,
+        inputNavLamports: inputNavLamports,
+        minOutputLamports: minOutputLamports,
+      ),
+
+      // Close wSOL account (unwrap to native SOL)
+      txBuilder.buildCloseAccountInstruction(
+        account: userWsolAta,
+        destination: userPubkey,
+        owner: userPubkey,
+      ),
+    ];
+
+    // 4. Compile and return unsigned tx
+    final message = Message(instructions: instructions);
+    final feePayer = Ed25519HDPublicKey.fromBase58(userPubkey);
+    final compiledMessage = message.compile(
+      recentBlockhash: recentBlockhash,
+      feePayer: feePayer,
+    );
+    final signature = Signature(List.filled(64, 0), publicKey: feePayer);
+    final signedTx = SignedTx(
+        compiledMessage: compiledMessage, signatures: [signature]);
+    return Uint8List.fromList(signedTx.toByteArray().toList());
+  }
 }
