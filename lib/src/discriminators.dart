@@ -107,6 +107,9 @@ class SamsaraDiscriminators {
   /// `withdraw` — Withdraw navToken from personal position escrow.
   static const List<int> withdraw = [183, 18, 70, 156, 148, 109, 161, 34];
 
+  /// `collect_rev_prana` — Collect accumulated revenue from prANA deposits.
+  static const List<int> collectRevPrana = [69, 140, 105, 250, 40, 226, 233, 116];
+
   /// All Samsara / Mayflower discriminators keyed by instruction name.
   static const Map<String, List<int>> all = {
     'init_personal_position': initPersonalPosition,
@@ -119,6 +122,7 @@ class SamsaraDiscriminators {
     'repay': repay,
     'deposit': deposit,
     'withdraw': withdraw,
+    'collect_rev_prana': collectRevPrana,
   };
 
   static String toJson() => jsonEncode(all);

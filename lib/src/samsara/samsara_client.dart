@@ -122,8 +122,8 @@ class SamsaraClient {
       market.baseName: baseBalance,
       'prANA_deposited': _parseTokenAmountFromAccountData(
           accounts[pranaEscrowIdx], _pranaDecimals),
-      'rewards_unclaimed': _parseGovAccountRewards(
-          accounts[govAccountIdx], market.baseDecimals),
+      'rewards_unclaimed': await getClaimableRewardsViaSimulation(
+          userPubkey: userPubkey, market: market),
       'debt': _parsePersonalPositionDebt(
           accounts[personalPositionIdx], market.baseDecimals),
     };
@@ -237,8 +237,8 @@ class SamsaraClient {
         market.baseName: baseBalance,
         'prANA_deposited': _parseTokenAmountFromAccountData(
             accounts[slice.pranaEscrowIndex], _pranaDecimals),
-        'rewards_unclaimed': _parseGovAccountRewards(
-            accounts[slice.govAccountIndex], market.baseDecimals),
+        'rewards_unclaimed': await getClaimableRewardsViaSimulation(
+            userPubkey: userPubkey, market: market),
         'debt': _parsePersonalPositionDebt(
             accounts[slice.personalPositionIndex], market.baseDecimals),
       };
@@ -299,11 +299,116 @@ class SamsaraClient {
   /// uses an accumulator model (reward-per-share) that requires the global
   /// market state to compute the actual claimable amount. Returns 0.0
   /// until a simulation-based approach is implemented.
-  // TODO: Implement via collectRevPrana simulation (similar to
-  // NirvanaClient.getClaimableRevshareViaSimulation).
   static double _parseGovAccountRewards(
       Map<String, dynamic>? account, int baseDecimals) {
+    // Rewards use an accumulator model that can't be read directly.
+    // Use getClaimableRewardsViaSimulation() instead.
     return 0.0;
+  }
+
+  /// Gets claimable prANA revenue for a market by simulating a
+  /// collectRevPrana transaction and reading the post-state token balance.
+  ///
+  /// This simulates without signing — the RPC node replaces the blockhash
+  /// and skips signature verification.
+  ///
+  /// Returns 0.0 if the user has no govAccount or no claimable rewards.
+  Future<double> getClaimableRewardsViaSimulation({
+    required String userPubkey,
+    required NavTokenMarket market,
+  }) async {
+    final ownerKey = Ed25519HDPublicKey.fromBase58(userPubkey);
+    final samsaraPda = SamsaraPda(
+        Ed25519HDPublicKey.fromBase58(_config.samsaraProgramId));
+    final txBuilder = SamsaraTransactionBuilder(config: _config);
+
+    // Derive PDAs
+    final samsaraMarketKey =
+        Ed25519HDPublicKey.fromBase58(market.samsaraMarket);
+    final govAccountKey = await samsaraPda.personalGovAccount(
+        market: samsaraMarketKey, owner: ownerKey);
+    final cashEscrowKey = await samsaraPda.marketCashEscrow(
+        market: samsaraMarketKey);
+    final samLogCounterKey = await samsaraPda.logCounter();
+
+    // Cash destination: user's base token ATA (wSOL ATA for SOL markets)
+    final baseMintKey = Ed25519HDPublicKey.fromBase58(market.baseMint);
+    final cashDstKey = await findAssociatedTokenAddress(
+        owner: ownerKey, mint: baseMintKey);
+    final cashDst = cashDstKey.toBase58();
+
+    // Build instructions
+    final instructions = <Instruction>[];
+
+    // CreateATA idempotent — ensures the destination exists (critical for
+    // SOL markets where wSOL ATA may not exist)
+    instructions.add(txBuilder.buildCreateAtaIdempotentInstruction(
+      payer: userPubkey,
+      associatedTokenAccount: cashDst,
+      owner: userPubkey,
+      mint: market.baseMint,
+    ));
+
+    // collectRevPrana — claims revenue into cashDst
+    instructions.add(txBuilder.buildCollectRevPranaInstruction(
+      userPubkey: userPubkey,
+      samsaraMarket: market.samsaraMarket,
+      govAccount: govAccountKey.toBase58(),
+      cashEscrow: cashEscrowKey.toBase58(),
+      cashDst: cashDst,
+      baseMint: market.baseMint,
+      samLogCounter: samLogCounterKey.toBase58(),
+    ));
+
+    // NOTE: No CloseAccount — we want post-state to show the balance
+
+    // Build and serialize the transaction (unsigned, for simulation only)
+    final blockhash = await _rpcClient.getLatestBlockhash();
+    final message = Message(instructions: instructions);
+    final compiledMessage = message.compile(
+      recentBlockhash: blockhash,
+      feePayer: ownerKey,
+    );
+
+    final serializedMessage = compiledMessage.toByteArray().toList();
+    final txBytes = <int>[
+      1, // signature count
+      ...List.filled(64, 0), // empty signature (simulation skips verification)
+      ...serializedMessage,
+    ];
+    final txBase64 = base64Encode(txBytes);
+
+    // Simulate and read post-state of cashDst
+    final simResult = await _rpcClient.simulateTransactionWithAccounts(
+      txBase64,
+      [cashDst],
+    );
+
+    // Check for simulation errors
+    if (simResult['err'] != null) {
+      return 0.0;
+    }
+
+    // Parse post-state balance from the cashDst account
+    final simAccounts = simResult['accounts'] as List?;
+    if (simAccounts == null || simAccounts.isEmpty) return 0.0;
+
+    final postState = simAccounts[0] as Map<String, dynamic>?;
+    if (postState == null || postState['data'] == null) return 0.0;
+
+    final dataArray = postState['data'] as List<dynamic>?;
+    if (dataArray == null || dataArray.isEmpty) return 0.0;
+
+    final base64Data = dataArray[0] as String?;
+    if (base64Data == null || base64Data.isEmpty) return 0.0;
+
+    final bytes = base64Decode(base64Data);
+    if (bytes.length < 72) return 0.0;
+
+    final byteData = ByteData.sublistView(Uint8List.fromList(bytes), 64, 72);
+    final postBalance = byteData.getUint64(0, Endian.little);
+
+    return postBalance / _pow10(market.baseDecimals);
   }
 
   /// Parses borrow debt from a PersonalPosition's raw account data.

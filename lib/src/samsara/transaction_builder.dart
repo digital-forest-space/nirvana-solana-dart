@@ -1081,6 +1081,86 @@ class SamsaraTransactionBuilder {
     );
   }
 
+  /// Build Samsara collectRevPrana instruction (claim accumulated prANA revenue).
+  ///
+  /// Claims revenue from prANA deposits in the market's govAccount.
+  /// Revenue is paid in the market's base token (e.g., SOL for navSOL).
+  /// Data is discriminator-only (8 bytes, no amount parameter).
+  ///
+  /// Based on browser interception of claim transaction from navSOL market.
+  Instruction buildCollectRevPranaInstruction({
+    required String userPubkey,
+    required String samsaraMarket,
+    required String govAccount,
+    required String cashEscrow,
+    required String cashDst,
+    required String baseMint,
+    required String samLogCounter,
+  }) {
+    final accounts = [
+      // 0: Owner (signer, writable)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(userPubkey),
+        isSigner: true,
+        isWriteable: true,
+      ),
+      // 1: Samsara Market (writable)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(samsaraMarket),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 2: GovAccount (writable)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(govAccount),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 3: Cash escrow (writable — funds leave escrow)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(cashEscrow),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 4: Cash destination — user's base token ATA (writable — receives rewards)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(cashDst),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 5: Base token mint (read-only)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(baseMint),
+        isSigner: false,
+        isWriteable: false,
+      ),
+      // 6: Token program
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(_config.tokenProgram),
+        isSigner: false,
+        isWriteable: false,
+      ),
+      // 7: Samsara log counter (writable)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(samLogCounter),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 8: Samsara program (CPI target)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(_config.samsaraProgramId),
+        isSigner: false,
+        isWriteable: false,
+      ),
+    ];
+
+    return Instruction(
+      programId: Ed25519HDPublicKey.fromBase58(_config.samsaraProgramId),
+      accounts: accounts,
+      data: ByteArray(Uint8List.fromList(SamsaraDiscriminators.collectRevPrana)),
+    );
+  }
+
   /// Build CreateAssociatedTokenAccountIdempotent instruction
   Instruction buildCreateAtaIdempotentInstruction({
     required String payer,
