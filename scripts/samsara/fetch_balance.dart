@@ -123,6 +123,9 @@ void main(List<String> args) async {
 
       resultList.add({
         'market': market.name,
+        'marketAddress': market.mayflowerMarket,
+        'navMint': market.navMint,
+        'baseMint': market.baseMint,
         'liquid': {
           'currency': market.name,
           'amount': liquid,

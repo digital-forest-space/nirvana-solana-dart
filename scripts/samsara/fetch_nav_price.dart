@@ -104,7 +104,10 @@ void main(List<String> args) async {
 
       final entry = <String, dynamic>{
         'market': market.name,
+        'marketAddress': market.mayflowerMarket,
+        'navMint': market.navMint,
         'base': market.baseName,
+        'baseMint': market.baseMint,
         'floor': floorPrice,
         'status': priceResult.status.name,
       };
