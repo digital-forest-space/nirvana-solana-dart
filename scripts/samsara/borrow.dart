@@ -9,19 +9,19 @@ import 'package:nirvana_solana/src/rpc/solana_rpc_client.dart';
 
 /// Borrow base token from a Mayflower market against deposited prANA
 ///
-/// Usage: dart scripts/samsara/borrow_base.dart <keypair_path> <amount> [--market <name>] [--rpc <url>] [--verbose] [--dry-run]
+/// Usage: dart scripts/samsara/borrow.dart <keypair_path> <amount> [--market <name>] [--rpc <url>] [--verbose] [--dry-run]
 ///
 /// Examples:
-///   dart scripts/samsara/borrow_base.dart ~/.config/solana/id.json 0.01
-///   dart scripts/samsara/borrow_base.dart ~/.config/solana/id.json 0.5 --market navSOL --verbose
-///   dart scripts/samsara/borrow_base.dart ~/.config/solana/id.json 0.001 --market navCBBTC --dry-run
+///   dart scripts/samsara/borrow.dart ~/.config/solana/id.json 0.01
+///   dart scripts/samsara/borrow.dart ~/.config/solana/id.json 0.5 --market navSOL --verbose
+///   dart scripts/samsara/borrow.dart ~/.config/solana/id.json 0.001 --market navCBBTC --dry-run
 ///
 /// Environment:
 ///   SOLANA_RPC_URL - RPC endpoint (default: https://api.mainnet-beta.solana.com)
 
 void main(List<String> args) async {
   if (args.length < 2) {
-    print('Usage: dart scripts/samsara/borrow_base.dart <keypair_path> <amount> [options]');
+    print('Usage: dart scripts/samsara/borrow.dart <keypair_path> <amount> [options]');
     print('');
     print('Borrows the base token (e.g., SOL) from a navToken market.');
     print('');

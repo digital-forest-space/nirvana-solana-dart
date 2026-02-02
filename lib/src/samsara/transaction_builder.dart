@@ -796,6 +796,100 @@ class SamsaraTransactionBuilder {
     );
   }
 
+  /// Build Mayflower repay instruction (repays borrowed base token to market)
+  ///
+  /// Repays base token (e.g., SOL) back to the market's vault, reducing the
+  /// user's borrow balance. The repaid tokens are transferred from the user's
+  /// base token ATA to the market vault.
+  ///
+  /// Based on browser interception of repay transaction to navSOL market.
+  Instruction buildRepayBaseInstruction({
+    required String userPubkey,
+    required String userBaseTokenAccount,
+    required String personalPosition,
+    required NavTokenMarket market,
+    required int repayLamports,
+  }) {
+    // Build instruction data: discriminator + repay amount
+    final amountBytes = Uint8List(8);
+    amountBytes.buffer.asByteData().setUint64(0, repayLamports, Endian.little);
+
+    final instructionData = [
+      ...NirvanaDiscriminators.repayBase,
+      ...amountBytes,
+    ];
+
+    // Build accounts in exact order from intercepted repay transaction (10 accounts)
+    final accounts = [
+      // 0: User Wallet (signer)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(userPubkey),
+        isSigner: true,
+        isWriteable: true,
+      ),
+      // 1: Market Metadata
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(market.marketMetadata),
+        isSigner: false,
+        isWriteable: false,
+      ),
+      // 2: Mayflower Market (writable — tracks borrow state)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(market.mayflowerMarket),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 3: Personal Position PDA (writable — tracks user's borrow)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(personalPosition),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 4: Base Token Mint
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(market.baseMint),
+        isSigner: false,
+        isWriteable: false,
+      ),
+      // 5: User base token ATA (writable — tokens leave here)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(userBaseTokenAccount),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 6: Market Base Vault (writable — tokens return here)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(market.marketSolVault),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 7: Token Program
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(_config.tokenProgram),
+        isSigner: false,
+        isWriteable: false,
+      ),
+      // 8: Authority PDA (writable)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(market.authorityPda),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 9: Mayflower Program
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(_config.mayflowerProgramId),
+        isSigner: false,
+        isWriteable: false,
+      ),
+    ];
+
+    return Instruction(
+      programId: Ed25519HDPublicKey.fromBase58(_config.mayflowerProgramId),
+      accounts: accounts,
+      data: ByteArray(Uint8List.fromList(instructionData)),
+    );
+  }
+
   /// Build CreateAssociatedTokenAccountIdempotent instruction
   Instruction buildCreateAtaIdempotentInstruction({
     required String payer,
