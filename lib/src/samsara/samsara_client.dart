@@ -916,6 +916,79 @@ class SamsaraClient {
         compiledMessage: compiledMessage, signatures: [signature]);
     return Uint8List.fromList(signedTx.toByteArray().toList());
   }
+  /// Build an unsigned deposit navToken transaction for a Mayflower market.
+  ///
+  /// Deposits navToken (e.g., navSOL) from the user's wallet ATA into the
+  /// market's personal position escrow. The user must already have a personal
+  /// position for this market (i.e., have bought navTokens before).
+  ///
+  /// No wSOL wrapping needed — we're depositing navToken, not base token.
+  ///
+  /// Returns serialized transaction bytes ready for wallet signing.
+  Future<Uint8List> buildUnsignedDepositNavTokenTransaction({
+    required String userPubkey,
+    required NavTokenMarket market,
+    required int depositLamports,
+    required String recentBlockhash,
+    int computeUnitLimit = 200000,
+    int computeUnitPrice = 500000,
+  }) async {
+    final mayflowerPda = MayflowerPda(
+        Ed25519HDPublicKey.fromBase58(_config.mayflowerProgramId));
+    final txBuilder = SamsaraTransactionBuilder(config: _config);
+
+    // 1. Derive user's navToken ATA
+    final userNavAta = await _rpcClient.getAssociatedTokenAddress(
+        userPubkey, market.navMint);
+
+    // 2. Derive Mayflower PDAs
+    final marketMetaKey =
+        Ed25519HDPublicKey.fromBase58(market.marketMetadata);
+    final ownerKey = Ed25519HDPublicKey.fromBase58(userPubkey);
+    final personalPositionKey = await mayflowerPda.personalPosition(
+        marketMeta: marketMetaKey, owner: ownerKey);
+    final userSharesKey = await mayflowerPda.personalPositionEscrow(
+        personalPosition: personalPositionKey);
+    final personalPosition = personalPositionKey.toBase58();
+    final userShares = userSharesKey.toBase58();
+
+    // 3. Build instruction list
+    final instructions = <Instruction>[
+      txBuilder.buildSetComputeUnitLimitInstruction(computeUnitLimit),
+      txBuilder.buildSetComputeUnitPriceInstruction(computeUnitPrice),
+
+      // Create navToken ATA (idempotent)
+      txBuilder.buildCreateAtaIdempotentInstruction(
+        payer: userPubkey,
+        associatedTokenAccount: userNavAta,
+        owner: userPubkey,
+        mint: market.navMint,
+      ),
+
+      // Mayflower deposit navToken
+      txBuilder.buildDepositNavTokenInstruction(
+        userPubkey: userPubkey,
+        userNavTokenAccount: userNavAta,
+        personalPosition: personalPosition,
+        userShares: userShares,
+        market: market,
+        depositLamports: depositLamports,
+      ),
+    ];
+
+    // 4. Compile and return unsigned tx
+    final message = Message(instructions: instructions);
+    final feePayer = Ed25519HDPublicKey.fromBase58(userPubkey);
+    final compiledMessage = message.compile(
+      recentBlockhash: recentBlockhash,
+      feePayer: feePayer,
+    );
+    final signature = Signature(List.filled(64, 0), publicKey: feePayer);
+    final signedTx = SignedTx(
+        compiledMessage: compiledMessage, signatures: [signature]);
+    return Uint8List.fromList(signedTx.toByteArray().toList());
+  }
+
   /// Build an unsigned Mayflower repay transaction.
   ///
   /// Repays borrowed base token (e.g., SOL) back to the market.

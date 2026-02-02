@@ -101,6 +101,12 @@ class SamsaraDiscriminators {
   /// `repay` — Repay borrowed base token to a Mayflower market.
   static const List<int> repay = [234, 103, 67, 82, 208, 234, 219, 166];
 
+  /// `deposit` — Deposit navToken into personal position escrow.
+  static const List<int> deposit = [242, 35, 198, 137, 82, 225, 242, 182];
+
+  /// `withdraw` — Withdraw navToken from personal position escrow.
+  static const List<int> withdraw = [183, 18, 70, 156, 148, 109, 161, 34];
+
   /// All Samsara / Mayflower discriminators keyed by instruction name.
   static const Map<String, List<int>> all = {
     'init_personal_position': initPersonalPosition,
@@ -111,6 +117,8 @@ class SamsaraDiscriminators {
     'init_gov_account': initGovAccount,
     'borrow': borrow,
     'repay': repay,
+    'deposit': deposit,
+    'withdraw': withdraw,
   };
 
   static String toJson() => jsonEncode(all);
