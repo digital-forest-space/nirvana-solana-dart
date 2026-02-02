@@ -74,6 +74,12 @@ class NirvanaDiscriminators {
   /// `init_gov_account` — Initialize a user's govAccount for a market.
   static const List<int> initGovAccount = [16, 49, 201, 21, 187, 43, 241, 78];
 
+  /// `borrow` — Borrow base token from a Mayflower market against deposited prANA.
+  static const List<int> borrowBase = [228, 253, 131, 202, 207, 116, 89, 18];
+
+  /// `repay` — Repay borrowed base token to a Mayflower market.
+  static const List<int> repayBase = [234, 103, 67, 82, 208, 234, 219, 166];
+
   /// All Nirvana V2 protocol discriminators keyed by instruction name.
   static const Map<String, List<int>> nirvana = {
     'buy_exact2': buyExact2,
@@ -99,6 +105,8 @@ class NirvanaDiscriminators {
     'deposit_prana': depositPrana,
     'withdraw_prana': withdrawPrana,
     'init_gov_account': initGovAccount,
+    'borrow_base': borrowBase,
+    'repay_base': repayBase,
   };
 
   /// Every discriminator across both protocols.

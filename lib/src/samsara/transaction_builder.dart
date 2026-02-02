@@ -678,6 +678,124 @@ class SamsaraTransactionBuilder {
     );
   }
 
+  /// Build Mayflower borrow instruction (borrows base token from market)
+  ///
+  /// Borrows base token (e.g., SOL) from the market's vault against the user's
+  /// deposited prANA. The borrowed tokens are sent to the user's base token ATA.
+  ///
+  /// Based on browser interception of borrow transaction from navSOL market.
+  Instruction buildBorrowBaseInstruction({
+    required String userPubkey,
+    required String userBaseTokenAccount,
+    required String personalPosition,
+    required String logAccount,
+    required NavTokenMarket market,
+    required int borrowLamports,
+  }) {
+    // Build instruction data: discriminator + borrow amount
+    final amountBytes = Uint8List(8);
+    amountBytes.buffer.asByteData().setUint64(0, borrowLamports, Endian.little);
+
+    final instructionData = [
+      ...NirvanaDiscriminators.borrowBase,
+      ...amountBytes,
+    ];
+
+    // Build accounts in exact order from intercepted borrow transaction (14 accounts)
+    final accounts = [
+      // 0: User Wallet (signer)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(userPubkey),
+        isSigner: true,
+        isWriteable: true,
+      ),
+      // 1: Mayflower Tenant
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(_config.mayflowerTenant),
+        isSigner: false,
+        isWriteable: false,
+      ),
+      // 2: Market Group
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(market.marketGroup),
+        isSigner: false,
+        isWriteable: false,
+      ),
+      // 3: Market Metadata
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(market.marketMetadata),
+        isSigner: false,
+        isWriteable: false,
+      ),
+      // 4: Market Base Vault (writable — funds leave vault)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(market.marketSolVault),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 5: Market navToken Vault (writable)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(market.marketNavVault),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 6: Fee Vault (writable)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(market.feeVault),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 7: Base Token Mint
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(market.baseMint),
+        isSigner: false,
+        isWriteable: false,
+      ),
+      // 8: User base token ATA (writable — receives borrowed tokens)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(userBaseTokenAccount),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 9: Mayflower Market (writable — tracks borrow state)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(market.mayflowerMarket),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 10: Personal Position PDA (writable — tracks user's borrow)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(personalPosition),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 11: Token Program
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(_config.tokenProgram),
+        isSigner: false,
+        isWriteable: false,
+      ),
+      // 12: Mayflower log account (writable)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(logAccount),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 13: Mayflower Program
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(_config.mayflowerProgramId),
+        isSigner: false,
+        isWriteable: false,
+      ),
+    ];
+
+    return Instruction(
+      programId: Ed25519HDPublicKey.fromBase58(_config.mayflowerProgramId),
+      accounts: accounts,
+      data: ByteArray(Uint8List.fromList(instructionData)),
+    );
+  }
+
   /// Build CreateAssociatedTokenAccountIdempotent instruction
   Instruction buildCreateAtaIdempotentInstruction({
     required String payer,

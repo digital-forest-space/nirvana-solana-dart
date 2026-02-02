@@ -822,6 +822,100 @@ class SamsaraClient {
         compiledMessage: compiledMessage, signatures: [signature]);
     return Uint8List.fromList(signedTx.toByteArray().toList());
   }
+
+  /// Build an unsigned borrow transaction for a Mayflower market.
+  ///
+  /// Borrows the market's base token (e.g., SOL for navSOL) against the user's
+  /// deposited prANA. The user must already have a personal position for this
+  /// market (i.e., have bought navTokens before).
+  ///
+  /// For native SOL markets, wraps/unwraps via a temporary wSOL account.
+  ///
+  /// Returns serialized transaction bytes ready for wallet signing.
+  Future<Uint8List> buildUnsignedBorrowTransaction({
+    required String userPubkey,
+    required NavTokenMarket market,
+    required int borrowLamports,
+    required String recentBlockhash,
+    int computeUnitLimit = 200000,
+    int computeUnitPrice = 500000,
+  }) async {
+    final mayflowerPda = MayflowerPda(
+        Ed25519HDPublicKey.fromBase58(_config.mayflowerProgramId));
+    final txBuilder = SamsaraTransactionBuilder(config: _config);
+
+    // 1. Derive user's base token ATA
+    final userBaseAta = await _rpcClient.getAssociatedTokenAddress(
+        userPubkey, market.baseMint);
+
+    // 2. Derive Mayflower PDAs
+    final marketMetaKey =
+        Ed25519HDPublicKey.fromBase58(market.marketMetadata);
+    final ownerKey = Ed25519HDPublicKey.fromBase58(userPubkey);
+    final personalPositionKey = await mayflowerPda.personalPosition(
+        marketMeta: marketMetaKey, owner: ownerKey);
+    final personalPosition = personalPositionKey.toBase58();
+    final logAccount = (await mayflowerPda.logAccount()).toBase58();
+
+    final isNativeSol = market.baseMint == _nativeSolMint;
+
+    // 3. Build instruction list
+    final instructions = <Instruction>[
+      txBuilder.buildSetComputeUnitLimitInstruction(computeUnitLimit),
+      txBuilder.buildSetComputeUnitPriceInstruction(computeUnitPrice),
+
+      // Create base token ATA (idempotent)
+      txBuilder.buildCreateAtaIdempotentInstruction(
+        payer: userPubkey,
+        associatedTokenAccount: userBaseAta,
+        owner: userPubkey,
+        mint: market.baseMint,
+      ),
+    ];
+
+    if (isNativeSol) {
+      // Transfer 0 lamports + sync native (ensure wSOL account is active)
+      instructions.addAll([
+        txBuilder.buildTransferInstruction(
+          from: userPubkey,
+          to: userBaseAta,
+          lamports: 0,
+        ),
+        txBuilder.buildSyncNativeInstruction(userBaseAta),
+      ]);
+    }
+
+    // Mayflower borrow base token
+    instructions.add(txBuilder.buildBorrowBaseInstruction(
+      userPubkey: userPubkey,
+      userBaseTokenAccount: userBaseAta,
+      personalPosition: personalPosition,
+      logAccount: logAccount,
+      market: market,
+      borrowLamports: borrowLamports,
+    ));
+
+    if (isNativeSol) {
+      // Close wSOL account (unwrap to native SOL)
+      instructions.add(txBuilder.buildCloseAccountInstruction(
+        account: userBaseAta,
+        destination: userPubkey,
+        owner: userPubkey,
+      ));
+    }
+
+    // 4. Compile and return unsigned tx
+    final message = Message(instructions: instructions);
+    final feePayer = Ed25519HDPublicKey.fromBase58(userPubkey);
+    final compiledMessage = message.compile(
+      recentBlockhash: recentBlockhash,
+      feePayer: feePayer,
+    );
+    final signature = Signature(List.filled(64, 0), publicKey: feePayer);
+    final signedTx = SignedTx(
+        compiledMessage: compiledMessage, signatures: [signature]);
+    return Uint8List.fromList(signedTx.toByteArray().toList());
+  }
 }
 
 /// Tracks which indices in the getMultipleAccounts result belong to a market.
