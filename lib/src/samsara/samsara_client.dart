@@ -1338,6 +1338,99 @@ class SamsaraClient {
     return Uint8List.fromList(signedTx.toByteArray().toList());
   }
 
+  /// Build an unsigned claim rewards transaction for a Samsara market.
+  ///
+  /// Claims all accrued prANA revenue (paid in base token, e.g., SOL).
+  /// No amount parameter — claims everything available.
+  /// For native SOL markets, wraps/unwraps via a temporary wSOL account.
+  ///
+  /// Returns serialized transaction bytes ready for wallet signing.
+  Future<Uint8List> buildUnsignedClaimRewardsTransaction({
+    required String userPubkey,
+    required NavTokenMarket market,
+    required String recentBlockhash,
+    int computeUnitLimit = 200000,
+    int computeUnitPrice = 500000,
+  }) async {
+    final samsaraPda = SamsaraPda(
+        Ed25519HDPublicKey.fromBase58(_config.samsaraProgramId));
+    final txBuilder = SamsaraTransactionBuilder(config: _config);
+
+    // 1. Derive user's base token ATA
+    final userBaseAta = await _rpcClient.getAssociatedTokenAddress(
+        userPubkey, market.baseMint);
+
+    // 2. Derive Samsara PDAs
+    final samsaraMarketKey =
+        Ed25519HDPublicKey.fromBase58(market.samsaraMarket);
+    final ownerKey = Ed25519HDPublicKey.fromBase58(userPubkey);
+    final govAccount = await samsaraPda.personalGovAccount(
+        market: samsaraMarketKey, owner: ownerKey);
+    final cashEscrow = await samsaraPda.marketCashEscrow(
+        market: samsaraMarketKey);
+    final logCounter = await samsaraPda.logCounter();
+
+    final isNativeSol = market.baseMint == _nativeSolMint;
+
+    // 3. Build instruction list
+    final instructions = <Instruction>[
+      txBuilder.buildSetComputeUnitLimitInstruction(computeUnitLimit),
+      txBuilder.buildSetComputeUnitPriceInstruction(computeUnitPrice),
+
+      // Create base token ATA (idempotent)
+      txBuilder.buildCreateAtaIdempotentInstruction(
+        payer: userPubkey,
+        associatedTokenAccount: userBaseAta,
+        owner: userPubkey,
+        mint: market.baseMint,
+      ),
+    ];
+
+    if (isNativeSol) {
+      // Transfer 0 lamports + sync native (ensure wSOL account is active)
+      instructions.addAll([
+        txBuilder.buildTransferInstruction(
+          from: userPubkey,
+          to: userBaseAta,
+          lamports: 0,
+        ),
+        txBuilder.buildSyncNativeInstruction(userBaseAta),
+      ]);
+    }
+
+    // Samsara collect revenue (claim rewards)
+    instructions.add(txBuilder.buildCollectRevPranaInstruction(
+      userPubkey: userPubkey,
+      samsaraMarket: market.samsaraMarket,
+      govAccount: govAccount.toBase58(),
+      cashEscrow: cashEscrow.toBase58(),
+      cashDst: userBaseAta,
+      baseMint: market.baseMint,
+      samLogCounter: logCounter.toBase58(),
+    ));
+
+    if (isNativeSol) {
+      // Close wSOL account (unwrap to native SOL)
+      instructions.add(txBuilder.buildCloseAccountInstruction(
+        account: userBaseAta,
+        destination: userPubkey,
+        owner: userPubkey,
+      ));
+    }
+
+    // 4. Compile and return unsigned tx
+    final message = Message(instructions: instructions);
+    final feePayer = Ed25519HDPublicKey.fromBase58(userPubkey);
+    final compiledMessage = message.compile(
+      recentBlockhash: recentBlockhash,
+      feePayer: feePayer,
+    );
+    final signature = Signature(List.filled(64, 0), publicKey: feePayer);
+    final signedTx = SignedTx(
+        compiledMessage: compiledMessage, signatures: [signature]);
+    return Uint8List.fromList(signedTx.toByteArray().toList());
+  }
+
   /// Build an unsigned Mayflower repay transaction.
   ///
   /// Repays borrowed base token (e.g., SOL) back to the market.
