@@ -31,7 +31,7 @@ class SamsaraClient {
   ///
   /// Returns a map with keys:
   ///   - `'{name}'` (e.g., `'navSOL'`): unstaked navToken in user's wallet
-  ///   - `'{name}_staked'` (e.g., `'navSOL_staked'`): navToken staked in
+  ///   - `'{name}_deposited'` (e.g., `'navSOL_deposited'`): navToken deposited in
   ///     the Mayflower personal position escrow
   ///   - `'{baseName}'` (e.g., `'SOL'`): user's base token balance
   ///
@@ -92,7 +92,7 @@ class SamsaraClient {
     return {
       market.name: _parseTokenAmountFromAccountData(
           navAtaAccount, market.navDecimals),
-      '${market.name}_staked': _parseTokenAmountFromAccountData(
+      '${market.name}_deposited': _parseTokenAmountFromAccountData(
           escrowAccount, market.navDecimals),
       market.baseName: baseBalance,
     };
@@ -174,7 +174,7 @@ class SamsaraClient {
       results[market.name] = {
         market.name: _parseTokenAmountFromAccountData(
             navAtaAccount, market.navDecimals),
-        '${market.name}_staked': _parseTokenAmountFromAccountData(
+        '${market.name}_deposited': _parseTokenAmountFromAccountData(
             escrowAccount, market.navDecimals),
         market.baseName: baseBalance,
       };

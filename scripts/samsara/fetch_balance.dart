@@ -108,16 +108,16 @@ void main(List<String> args) async {
     for (final market in markets) {
       final balances = allBalances[market.name]!;
       final liquid = balances[market.name]!;
-      final staked = balances['${market.name}_staked']!;
+      final deposited = balances['${market.name}_deposited']!;
 
-      if (activeOnly && liquid == 0.0 && staked == 0.0) continue;
+      if (activeOnly && liquid == 0.0 && deposited == 0.0) continue;
 
       if (verbose) {
         final navDecimals = market.navDecimals > 6 ? 8 : 6;
         final baseDecimals = market.baseDecimals > 6 ? 8 : 6;
         print('');
         print('${market.name} (liquid): ${liquid.toStringAsFixed(navDecimals)}');
-        print('${market.name} (staked): ${staked.toStringAsFixed(navDecimals)}');
+        print('${market.name} (deposited): ${deposited.toStringAsFixed(navDecimals)}');
         print('${market.baseName}: ${balances[market.baseName]!.toStringAsFixed(baseDecimals)}');
       }
 
@@ -127,9 +127,9 @@ void main(List<String> args) async {
           'currency': market.name,
           'amount': liquid,
         },
-        'staked': {
+        'deposited': {
           'currency': market.name,
-          'amount': staked,
+          'amount': deposited,
         },
         'base': {
           'currency': market.baseName,
@@ -139,10 +139,7 @@ void main(List<String> args) async {
     }
 
     print(jsonEncode({
-      'success': true,
       'wallet': userPubkey,
-      'accounts': accountCount,
-      'batches': batchCount,
       'markets': resultList,
     }));
   } catch (e) {
