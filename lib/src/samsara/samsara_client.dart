@@ -886,7 +886,7 @@ class SamsaraClient {
     }
 
     // Mayflower borrow base token
-    instructions.add(txBuilder.buildBorrowBaseInstruction(
+    instructions.add(txBuilder.buildBorrowInstruction(
       userPubkey: userPubkey,
       userBaseTokenAccount: userBaseAta,
       personalPosition: personalPosition,
@@ -973,7 +973,7 @@ class SamsaraClient {
     }
 
     // Mayflower repay base token
-    instructions.add(txBuilder.buildRepayBaseInstruction(
+    instructions.add(txBuilder.buildRepayInstruction(
       userPubkey: userPubkey,
       userBaseTokenAccount: userBaseAta,
       personalPosition: personalPosition,

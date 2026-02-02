@@ -1,14 +1,11 @@
 import 'dart:convert';
 
-/// Canonical map of all Anchor instruction discriminators for the Nirvana
-/// and Samsara (Mayflower) protocols.
+/// Anchor instruction discriminators for the Nirvana V2 protocol.
 ///
 /// Each discriminator is the first 8 bytes of `sha256('global:<instruction_name>')`.
 /// They are used as the instruction identifier prefix in Solana transaction data.
 class NirvanaDiscriminators {
   NirvanaDiscriminators._();
-
-  // ── Nirvana V2 protocol ──────────────────────────────────────────────
 
   /// `buy_exact2` — Buy ANA with USDC or NIRV.
   static const List<int> buyExact2 = [109, 5, 199, 243, 164, 233, 19, 152];
@@ -49,39 +46,13 @@ class NirvanaDiscriminators {
   /// `stage_rev_prana` — Stage revenue prANA for claiming.
   static const List<int> stageRevPrana = [66, 99, 75, 75, 81, 176, 254, 169];
 
-  // ── Nirvana V2 account discriminators ────────────────────────────────
+  // ── Account discriminators ─────────────────────────────────────────
 
   /// Tenant account discriminator — identifies Nirvana tenant accounts.
   static const List<int> tenant = [61, 43, 215, 51, 232, 242, 209, 170];
 
-  // ── Samsara / Mayflower protocol ─────────────────────────────────────
-
-  /// `init_personal_position` — Create navToken personal position PDA.
-  static const List<int> initPersonalPosition = [146, 163, 167, 48, 30, 216, 179, 88];
-
-  /// `buy` (BuyWithExactCashInAndDeposit) — Buy navToken with base token.
-  static const List<int> buyNavToken = [30, 205, 124, 67, 20, 142, 236, 136];
-
-  /// `sell` (SellWithExactTokenIn) — Sell navToken for base token.
-  static const List<int> sellNavToken = [223, 239, 212, 254, 255, 120, 53, 1];
-
-  /// `deposit_prana` — Deposit prANA to a market's govAccount.
-  static const List<int> depositPrana = [167, 25, 30, 117, 67, 213, 8, 210];
-
-  /// `withdraw_prana` — Withdraw prANA from a market's govAccount.
-  static const List<int> withdrawPrana = [82, 134, 30, 249, 3, 225, 239, 26];
-
-  /// `init_gov_account` — Initialize a user's govAccount for a market.
-  static const List<int> initGovAccount = [16, 49, 201, 21, 187, 43, 241, 78];
-
-  /// `borrow` — Borrow base token from a Mayflower market against deposited prANA.
-  static const List<int> borrowBase = [228, 253, 131, 202, 207, 116, 89, 18];
-
-  /// `repay` — Repay borrowed base token to a Mayflower market.
-  static const List<int> repayBase = [234, 103, 67, 82, 208, 234, 219, 166];
-
   /// All Nirvana V2 protocol discriminators keyed by instruction name.
-  static const Map<String, List<int>> nirvana = {
+  static const Map<String, List<int>> all = {
     'buy_exact2': buyExact2,
     'sell2': sell2,
     'deposit_ana': depositAna,
@@ -97,27 +68,50 @@ class NirvanaDiscriminators {
     'stage_rev_prana': stageRevPrana,
   };
 
+  static String toJson() => jsonEncode(all);
+}
+
+/// Anchor instruction discriminators for the Samsara / Mayflower protocol.
+///
+/// Each discriminator is the first 8 bytes of `sha256('global:<instruction_name>')`.
+class SamsaraDiscriminators {
+  SamsaraDiscriminators._();
+
+  /// `init_personal_position` — Create navToken personal position PDA.
+  static const List<int> initPersonalPosition = [146, 163, 167, 48, 30, 216, 179, 88];
+
+  /// `buy` (BuyWithExactCashInAndDeposit) — Buy navToken with base token.
+  static const List<int> buy = [30, 205, 124, 67, 20, 142, 236, 136];
+
+  /// `sell` (SellWithExactTokenIn) — Sell navToken for base token.
+  static const List<int> sell = [223, 239, 212, 254, 255, 120, 53, 1];
+
+  /// `deposit_prana` — Deposit prANA to a market's govAccount.
+  static const List<int> depositPrana = [167, 25, 30, 117, 67, 213, 8, 210];
+
+  /// `withdraw_prana` — Withdraw prANA from a market's govAccount.
+  static const List<int> withdrawPrana = [82, 134, 30, 249, 3, 225, 239, 26];
+
+  /// `init_gov_account` — Initialize a user's govAccount for a market.
+  static const List<int> initGovAccount = [16, 49, 201, 21, 187, 43, 241, 78];
+
+  /// `borrow` — Borrow base token from a Mayflower market against deposited prANA.
+  static const List<int> borrow = [228, 253, 131, 202, 207, 116, 89, 18];
+
+  /// `repay` — Repay borrowed base token to a Mayflower market.
+  static const List<int> repay = [234, 103, 67, 82, 208, 234, 219, 166];
+
   /// All Samsara / Mayflower discriminators keyed by instruction name.
-  static const Map<String, List<int>> samsara = {
+  static const Map<String, List<int>> all = {
     'init_personal_position': initPersonalPosition,
-    'buy': buyNavToken,
-    'sell': sellNavToken,
+    'buy': buy,
+    'sell': sell,
     'deposit_prana': depositPrana,
     'withdraw_prana': withdrawPrana,
     'init_gov_account': initGovAccount,
-    'borrow_base': borrowBase,
-    'repay_base': repayBase,
+    'borrow': borrow,
+    'repay': repay,
   };
 
-  /// Every discriminator across both protocols.
-  static const Map<String, List<int>> all = {
-    ...nirvana,
-    ...samsara,
-  };
-
-  /// JSON-serialisable representation of all discriminators.
-  ///
-  /// Each value is the 8-byte discriminator as a `List<int>`.
-  /// Example: `{"buy_exact2": [109, 5, 199, 243, 164, 233, 19, 152], ...}`
   static String toJson() => jsonEncode(all);
 }

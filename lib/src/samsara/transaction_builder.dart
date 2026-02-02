@@ -11,8 +11,8 @@ class SamsaraTransactionBuilder {
   SamsaraTransactionBuilder({SamsaraConfig? config})
       : _config = config ?? SamsaraConfig.mainnet();
 
-  static const List<int> _initPositionDiscriminator = NirvanaDiscriminators.initPersonalPosition;
-  static const List<int> _buyDiscriminator = NirvanaDiscriminators.buyNavToken;
+  static const List<int> _initPositionDiscriminator = SamsaraDiscriminators.initPersonalPosition;
+  static const List<int> _buyDiscriminator = SamsaraDiscriminators.buy;
 
   /// Build init_personal_position instruction
   /// This must be called before the first buy for a fresh wallet
@@ -275,7 +275,7 @@ class SamsaraTransactionBuilder {
     minOutputBytes.buffer.asByteData().setUint64(0, minOutputLamports, Endian.little);
 
     final instructionData = [
-      ...NirvanaDiscriminators.sellNavToken,
+      ...SamsaraDiscriminators.sell,
       ...inputBytes,
       ...minOutputBytes,
     ];
@@ -586,7 +586,7 @@ class SamsaraTransactionBuilder {
     return Instruction(
       programId: Ed25519HDPublicKey.fromBase58(_config.samsaraProgramId),
       accounts: accounts,
-      data: ByteArray(Uint8List.fromList(NirvanaDiscriminators.initGovAccount)),
+      data: ByteArray(Uint8List.fromList(SamsaraDiscriminators.initGovAccount)),
     );
   }
 
@@ -605,7 +605,7 @@ class SamsaraTransactionBuilder {
   }) {
     // Instruction data: discriminator (8 bytes) + amount (u64 LE, 8 bytes)
     final data = Uint8List(16);
-    data.setAll(0, NirvanaDiscriminators.depositPrana);
+    data.setAll(0, SamsaraDiscriminators.depositPrana);
     data.buffer.asByteData().setUint64(8, amount, Endian.little);
 
     final accounts = [
@@ -684,7 +684,7 @@ class SamsaraTransactionBuilder {
   /// deposited prANA. The borrowed tokens are sent to the user's base token ATA.
   ///
   /// Based on browser interception of borrow transaction from navSOL market.
-  Instruction buildBorrowBaseInstruction({
+  Instruction buildBorrowInstruction({
     required String userPubkey,
     required String userBaseTokenAccount,
     required String personalPosition,
@@ -697,7 +697,7 @@ class SamsaraTransactionBuilder {
     amountBytes.buffer.asByteData().setUint64(0, borrowLamports, Endian.little);
 
     final instructionData = [
-      ...NirvanaDiscriminators.borrowBase,
+      ...SamsaraDiscriminators.borrow,
       ...amountBytes,
     ];
 
@@ -803,7 +803,7 @@ class SamsaraTransactionBuilder {
   /// base token ATA to the market vault.
   ///
   /// Based on browser interception of repay transaction to navSOL market.
-  Instruction buildRepayBaseInstruction({
+  Instruction buildRepayInstruction({
     required String userPubkey,
     required String userBaseTokenAccount,
     required String personalPosition,
@@ -815,7 +815,7 @@ class SamsaraTransactionBuilder {
     amountBytes.buffer.asByteData().setUint64(0, repayLamports, Endian.little);
 
     final instructionData = [
-      ...NirvanaDiscriminators.repayBase,
+      ...SamsaraDiscriminators.repay,
       ...amountBytes,
     ];
 
