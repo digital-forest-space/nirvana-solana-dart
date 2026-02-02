@@ -26,6 +26,198 @@ class SamsaraClient {
     return SamsaraClient(rpcClient: rpcClient);
   }
 
+  /// Fetches the user's navToken balances (wallet + staked) and base token
+  /// balance for a market using a single batched RPC call.
+  ///
+  /// Returns a map with keys:
+  ///   - `'{name}'` (e.g., `'navSOL'`): unstaked navToken in user's wallet
+  ///   - `'{name}_staked'` (e.g., `'navSOL_staked'`): navToken staked in
+  ///     the Mayflower personal position escrow
+  ///   - `'{baseName}'` (e.g., `'SOL'`): user's base token balance
+  ///
+  /// Balances are in human-readable units (e.g., 1.5 SOL, not lamports).
+  /// Returns 0.0 for tokens the user doesn't hold or hasn't staked.
+  Future<Map<String, double>> fetchMarketBalances({
+    required String userPubkey,
+    required NavTokenMarket market,
+    int batchSize = 30,
+  }) async {
+    final ownerKey = Ed25519HDPublicKey.fromBase58(userPubkey);
+    final mayflowerPda = MayflowerPda(
+        Ed25519HDPublicKey.fromBase58(_config.mayflowerProgramId));
+
+    // Derive all addresses locally (pure PDA math, no RPC)
+    final navMintKey = Ed25519HDPublicKey.fromBase58(market.navMint);
+    final navAta = (await findAssociatedTokenAddress(
+        owner: ownerKey, mint: navMintKey)).toBase58();
+
+    final marketMetaKey =
+        Ed25519HDPublicKey.fromBase58(market.marketMetadata);
+    final personalPosition = await mayflowerPda.personalPosition(
+        marketMeta: marketMetaKey, owner: ownerKey);
+    final escrow = (await mayflowerPda.personalPositionEscrow(
+        personalPosition: personalPosition)).toBase58();
+
+    final isNativeSol = market.baseMint == _nativeSolMint;
+
+    // Build account list for batch fetch
+    final addresses = <String>[userPubkey, navAta, escrow];
+    if (!isNativeSol) {
+      final baseMintKey = Ed25519HDPublicKey.fromBase58(market.baseMint);
+      final baseAta = (await findAssociatedTokenAddress(
+          owner: ownerKey, mint: baseMintKey)).toBase58();
+      addresses.add(baseAta);
+    }
+
+    // Single batched RPC call
+    final accounts = await _rpcClient.getMultipleAccounts(
+        addresses, batchSize: batchSize);
+
+    // Parse results
+    final walletAccount = accounts[0];
+    final navAtaAccount = accounts[1];
+    final escrowAccount = accounts[2];
+
+    // Base token balance
+    double baseBalance;
+    if (isNativeSol) {
+      final lamports = walletAccount?['lamports'] as int? ?? 0;
+      baseBalance = lamports / _pow10(market.baseDecimals);
+    } else {
+      final baseAtaAccount = accounts[3];
+      baseBalance = _parseTokenAmountFromAccountData(
+          baseAtaAccount, market.baseDecimals);
+    }
+
+    return {
+      market.name: _parseTokenAmountFromAccountData(
+          navAtaAccount, market.navDecimals),
+      '${market.name}_staked': _parseTokenAmountFromAccountData(
+          escrowAccount, market.navDecimals),
+      market.baseName: baseBalance,
+    };
+  }
+
+  /// Fetches balances for all navToken markets in a single batched RPC call.
+  ///
+  /// Returns a map keyed by market name, where each value is the same
+  /// balance map returned by [fetchMarketBalances].
+  Future<Map<String, Map<String, double>>> fetchAllMarketBalances({
+    required String userPubkey,
+    List<NavTokenMarket>? markets,
+    int batchSize = 30,
+  }) async {
+    final allMarkets = markets ?? NavTokenMarket.all.values.toList();
+    final ownerKey = Ed25519HDPublicKey.fromBase58(userPubkey);
+    final mayflowerPda = MayflowerPda(
+        Ed25519HDPublicKey.fromBase58(_config.mayflowerProgramId));
+
+    // Derive all addresses locally for all markets
+    // Track which addresses belong to which market
+    final addresses = <String>[userPubkey]; // wallet always first
+    final marketSlices = <_MarketSlice>[];
+
+    for (final market in allMarkets) {
+      final startIndex = addresses.length;
+
+      final navMintKey = Ed25519HDPublicKey.fromBase58(market.navMint);
+      final navAta = (await findAssociatedTokenAddress(
+          owner: ownerKey, mint: navMintKey)).toBase58();
+      addresses.add(navAta);
+
+      final marketMetaKey =
+          Ed25519HDPublicKey.fromBase58(market.marketMetadata);
+      final personalPosition = await mayflowerPda.personalPosition(
+          marketMeta: marketMetaKey, owner: ownerKey);
+      final escrow = (await mayflowerPda.personalPositionEscrow(
+          personalPosition: personalPosition)).toBase58();
+      addresses.add(escrow);
+
+      String? baseAta;
+      if (market.baseMint != _nativeSolMint) {
+        final baseMintKey = Ed25519HDPublicKey.fromBase58(market.baseMint);
+        baseAta = (await findAssociatedTokenAddress(
+            owner: ownerKey, mint: baseMintKey)).toBase58();
+        addresses.add(baseAta);
+      }
+
+      marketSlices.add(_MarketSlice(
+        market: market,
+        navAtaIndex: startIndex,
+        escrowIndex: startIndex + 1,
+        baseAtaIndex: baseAta != null ? startIndex + 2 : null,
+      ));
+    }
+
+    // Single RPC call for all markets
+    final accounts = await _rpcClient.getMultipleAccounts(
+        addresses, batchSize: batchSize);
+    final walletAccount = accounts[0];
+
+    // Parse results per market
+    final results = <String, Map<String, double>>{};
+    for (final slice in marketSlices) {
+      final market = slice.market;
+      final navAtaAccount = accounts[slice.navAtaIndex];
+      final escrowAccount = accounts[slice.escrowIndex];
+
+      double baseBalance;
+      if (slice.baseAtaIndex != null) {
+        baseBalance = _parseTokenAmountFromAccountData(
+            accounts[slice.baseAtaIndex!], market.baseDecimals);
+      } else {
+        // Native SOL — read lamports from wallet
+        final lamports = walletAccount?['lamports'] as int? ?? 0;
+        baseBalance = lamports / _pow10(market.baseDecimals);
+      }
+
+      results[market.name] = {
+        market.name: _parseTokenAmountFromAccountData(
+            navAtaAccount, market.navDecimals),
+        '${market.name}_staked': _parseTokenAmountFromAccountData(
+            escrowAccount, market.navDecimals),
+        market.baseName: baseBalance,
+      };
+    }
+
+    return results;
+  }
+
+  static const _nativeSolMint =
+      'So11111111111111111111111111111111111111112';
+
+  /// Parses an SPL token amount from raw account data.
+  ///
+  /// SPL token account layout stores the amount as a u64 at byte offset 64.
+  /// Returns 0.0 if the account is null or data is missing/too short.
+  static double _parseTokenAmountFromAccountData(
+      Map<String, dynamic>? account, int decimals) {
+    if (account == null || account['data'] == null) return 0.0;
+
+    final dataArray = account['data'] as List<dynamic>?;
+    if (dataArray == null || dataArray.isEmpty) return 0.0;
+
+    final base64Data = dataArray[0] as String?;
+    if (base64Data == null || base64Data.isEmpty) return 0.0;
+
+    final bytes = base64Decode(base64Data);
+    if (bytes.length < 72) return 0.0; // offset 64 + 8 bytes for u64
+
+    // Read u64 little-endian at offset 64
+    final byteData = ByteData.sublistView(Uint8List.fromList(bytes), 64, 72);
+    final amount = byteData.getUint64(0, Endian.little);
+
+    return amount / _pow10(decimals);
+  }
+
+  static double _pow10(int n) {
+    double result = 1.0;
+    for (var i = 0; i < n; i++) {
+      result *= 10;
+    }
+    return result;
+  }
+
   /// Fetches the floor price for a navToken market from on-chain data.
   ///
   /// Reads the Mayflower Market account and decodes the floor price stored
@@ -630,4 +822,19 @@ class SamsaraClient {
         compiledMessage: compiledMessage, signatures: [signature]);
     return Uint8List.fromList(signedTx.toByteArray().toList());
   }
+}
+
+/// Tracks which indices in the getMultipleAccounts result belong to a market.
+class _MarketSlice {
+  final NavTokenMarket market;
+  final int navAtaIndex;
+  final int escrowIndex;
+  final int? baseAtaIndex; // null for native SOL markets
+
+  const _MarketSlice({
+    required this.market,
+    required this.navAtaIndex,
+    required this.escrowIndex,
+    this.baseAtaIndex,
+  });
 }

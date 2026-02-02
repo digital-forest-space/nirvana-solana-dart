@@ -56,6 +56,13 @@ abstract class SolanaRpcClient {
     List<String> accountAddresses,
   );
 
+  /// Get multiple accounts in a single RPC call.
+  /// Returns a list in the same order as input; null entries for accounts
+  /// that don't exist. Automatically batches into chunks of [batchSize]
+  /// to stay within RPC limits (max 100).
+  Future<List<Map<String, dynamic>?>> getMultipleAccounts(
+      List<String> addresses, {int batchSize = 30});
+
   /// Get recent blockhash
   Future<String> getLatestBlockhash();
 }
@@ -282,6 +289,42 @@ class DefaultSolanaRpcClient implements SolanaRpcClient {
     } finally {
       client.close();
     }
+  }
+
+  @override
+  Future<List<Map<String, dynamic>?>> getMultipleAccounts(
+      List<String> addresses, {int batchSize = 30}) async {
+    final results = <Map<String, dynamic>?>[];
+
+    for (var i = 0; i < addresses.length; i += batchSize) {
+      final end = (i + batchSize).clamp(0, addresses.length);
+      final batch = addresses.sublist(i, end);
+
+      final result = await _client.rpcClient.getMultipleAccounts(
+        batch,
+        encoding: Encoding.base64,
+      );
+
+      results.addAll(result.value.map((account) {
+        if (account == null) return null;
+
+        final data = account.data;
+        List<dynamic>? dataArray;
+        if (data is BinaryAccountData) {
+          dataArray = [base64.encode(data.data), 'base64'];
+        }
+
+        return {
+          'lamports': account.lamports,
+          'owner': account.owner,
+          'executable': account.executable,
+          'rentEpoch': account.rentEpoch,
+          'data': dataArray,
+        };
+      }));
+    }
+
+    return results;
   }
 
   @override
