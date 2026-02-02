@@ -1,0 +1,289 @@
+{
+  "operationType": "claim",
+  "timestamp": "2026-02-02T15:08:25.840Z",
+  "accounts": [
+    {
+      "index": 0,
+      "pubkey": "YOUR_WALLET_ADDRESS_HERE",
+      "label": ""
+    },
+    {
+      "index": 1,
+      "pubkey": "FjU49HMCR5T9edwi2i6ngGyZkaG9XTXakrTSdkYFd9wo",
+      "label": ""
+    },
+    {
+      "index": 2,
+      "pubkey": "4KnomWX4ga9qmDdQN9GctJKjEnwLQTNWWHs57MyYtmYc",
+      "label": "[navSOL Samsara Market]"
+    },
+    {
+      "index": 3,
+      "pubkey": "Gvj2W5XvB611ZJqZvAWdTUcD2uB2UkfFqgv3R4ico6gw",
+      "label": ""
+    },
+    {
+      "index": 4,
+      "pubkey": "5hh9VjbkG3P2MqSiEtpUnCdboUwBrW4NKki5F6ntpyFC",
+      "label": ""
+    },
+    {
+      "index": 5,
+      "pubkey": "G5GdMpizMafXkcPrLzmf1H7bQR3CMyxoMsHYmXKFaAdA",
+      "label": ""
+    },
+    {
+      "index": 6,
+      "pubkey": "ComputeBudget111111111111111111111111111111",
+      "label": ""
+    },
+    {
+      "index": 7,
+      "pubkey": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+      "label": ""
+    },
+    {
+      "index": 8,
+      "pubkey": "So11111111111111111111111111111111111111112",
+      "label": "[SOL]"
+    },
+    {
+      "index": 9,
+      "pubkey": "11111111111111111111111111111111",
+      "label": ""
+    },
+    {
+      "index": 10,
+      "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "label": ""
+    },
+    {
+      "index": 11,
+      "pubkey": "SAMmdq34d9RJoqoqfnGhMRUvZumQriaT55eGzXeAQj7",
+      "label": ""
+    }
+  ],
+  "addressTableLookups": [],
+  "instructions": [
+    {
+      "index": 0,
+      "programId": "ComputeBudget111111111111111111111111111111",
+      "programName": "ComputeBudget",
+      "programIdIndex": 6,
+      "accounts": [],
+      "data": "02400d0300",
+      "discriminator": [
+        2,
+        64,
+        13,
+        3,
+        0
+      ],
+      "dataLength": 5
+    },
+    {
+      "index": 1,
+      "programId": "ComputeBudget111111111111111111111111111111",
+      "programName": "ComputeBudget",
+      "programIdIndex": 6,
+      "accounts": [],
+      "data": "0320a1070000000000",
+      "discriminator": [
+        3,
+        32,
+        161,
+        7,
+        0,
+        0,
+        0,
+        0
+      ],
+      "dataLength": 9
+    },
+    {
+      "index": 2,
+      "programId": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+      "programName": "AssociatedToken",
+      "programIdIndex": 7,
+      "accounts": [
+        {
+          "index": 0,
+          "pubkey": "YOUR_WALLET_ADDRESS_HERE",
+          "label": ""
+        },
+        {
+          "index": 1,
+          "pubkey": "FjU49HMCR5T9edwi2i6ngGyZkaG9XTXakrTSdkYFd9wo",
+          "label": ""
+        },
+        {
+          "index": 0,
+          "pubkey": "YOUR_WALLET_ADDRESS_HERE",
+          "label": ""
+        },
+        {
+          "index": 8,
+          "pubkey": "So11111111111111111111111111111111111111112",
+          "label": "[SOL]"
+        },
+        {
+          "index": 9,
+          "pubkey": "11111111111111111111111111111111",
+          "label": ""
+        },
+        {
+          "index": 10,
+          "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+          "label": ""
+        }
+      ],
+      "data": "01",
+      "discriminator": [
+        1
+      ],
+      "dataLength": 1
+    },
+    {
+      "index": 3,
+      "programId": "11111111111111111111111111111111",
+      "programName": "Unknown",
+      "programIdIndex": 9,
+      "accounts": [
+        {
+          "index": 0,
+          "pubkey": "YOUR_WALLET_ADDRESS_HERE",
+          "label": ""
+        },
+        {
+          "index": 1,
+          "pubkey": "FjU49HMCR5T9edwi2i6ngGyZkaG9XTXakrTSdkYFd9wo",
+          "label": ""
+        }
+      ],
+      "data": "020000000000000000000000",
+      "discriminator": [
+        2,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "dataLength": 12
+    },
+    {
+      "index": 4,
+      "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "programName": "Token",
+      "programIdIndex": 10,
+      "accounts": [
+        {
+          "index": 1,
+          "pubkey": "FjU49HMCR5T9edwi2i6ngGyZkaG9XTXakrTSdkYFd9wo",
+          "label": ""
+        }
+      ],
+      "data": "11",
+      "discriminator": [
+        17
+      ],
+      "dataLength": 1
+    },
+    {
+      "index": 5,
+      "programId": "SAMmdq34d9RJoqoqfnGhMRUvZumQriaT55eGzXeAQj7",
+      "programName": "SAMSARA",
+      "programIdIndex": 11,
+      "accounts": [
+        {
+          "index": 0,
+          "pubkey": "YOUR_WALLET_ADDRESS_HERE",
+          "label": ""
+        },
+        {
+          "index": 2,
+          "pubkey": "4KnomWX4ga9qmDdQN9GctJKjEnwLQTNWWHs57MyYtmYc",
+          "label": "[navSOL Samsara Market]"
+        },
+        {
+          "index": 3,
+          "pubkey": "Gvj2W5XvB611ZJqZvAWdTUcD2uB2UkfFqgv3R4ico6gw",
+          "label": ""
+        },
+        {
+          "index": 4,
+          "pubkey": "5hh9VjbkG3P2MqSiEtpUnCdboUwBrW4NKki5F6ntpyFC",
+          "label": ""
+        },
+        {
+          "index": 1,
+          "pubkey": "FjU49HMCR5T9edwi2i6ngGyZkaG9XTXakrTSdkYFd9wo",
+          "label": ""
+        },
+        {
+          "index": 8,
+          "pubkey": "So11111111111111111111111111111111111111112",
+          "label": "[SOL]"
+        },
+        {
+          "index": 10,
+          "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+          "label": ""
+        },
+        {
+          "index": 5,
+          "pubkey": "G5GdMpizMafXkcPrLzmf1H7bQR3CMyxoMsHYmXKFaAdA",
+          "label": ""
+        },
+        {
+          "index": 11,
+          "pubkey": "SAMmdq34d9RJoqoqfnGhMRUvZumQriaT55eGzXeAQj7",
+          "label": ""
+        }
+      ],
+      "data": "458c69fa28e2e974",
+      "discriminator": [
+        69,
+        140,
+        105,
+        250,
+        40,
+        226,
+        233,
+        116
+      ],
+      "dataLength": 8
+    },
+    {
+      "index": 6,
+      "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "programName": "Token",
+      "programIdIndex": 10,
+      "accounts": [
+        {
+          "index": 1,
+          "pubkey": "FjU49HMCR5T9edwi2i6ngGyZkaG9XTXakrTSdkYFd9wo",
+          "label": ""
+        },
+        {
+          "index": 0,
+          "pubkey": "YOUR_WALLET_ADDRESS_HERE",
+          "label": ""
+        },
+        {
+          "index": 0,
+          "pubkey": "YOUR_WALLET_ADDRESS_HERE",
+          "label": ""
+        }
+      ],
+      "data": "09",
+      "discriminator": [
+        9
+      ],
+      "dataLength": 1
+    }
+  ],
+  "recentBlockhash": "8aSNWNMT3C3QzjoosLRycBuDvfpgVQ3xj7LsSxX3B39K"
+}

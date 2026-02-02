@@ -26,14 +26,18 @@ class SamsaraClient {
     return SamsaraClient(rpcClient: rpcClient);
   }
 
-  /// Fetches the user's navToken balances (wallet + staked) and base token
-  /// balance for a market using a single batched RPC call.
+  /// Fetches the user's navToken balances (wallet + staked), base token
+  /// balance, deposited prANA, unclaimed rewards, and debt for a market
+  /// using a single batched RPC call.
   ///
   /// Returns a map with keys:
   ///   - `'{name}'` (e.g., `'navSOL'`): unstaked navToken in user's wallet
   ///   - `'{name}_deposited'` (e.g., `'navSOL_deposited'`): navToken deposited in
   ///     the Mayflower personal position escrow
   ///   - `'{baseName}'` (e.g., `'SOL'`): user's base token balance
+  ///   - `'prANA_deposited'`: prANA deposited in this market's gov account
+  ///   - `'rewards_unclaimed'`: unclaimed revenue in base token units
+  ///   - `'debt'`: borrowed base token debt
   ///
   /// Balances are in human-readable units (e.g., 1.5 SOL, not lamports).
   /// Returns 0.0 for tokens the user doesn't hold or hasn't staked.
@@ -45,6 +49,8 @@ class SamsaraClient {
     final ownerKey = Ed25519HDPublicKey.fromBase58(userPubkey);
     final mayflowerPda = MayflowerPda(
         Ed25519HDPublicKey.fromBase58(_config.mayflowerProgramId));
+    final samsaraPda = SamsaraPda(
+        Ed25519HDPublicKey.fromBase58(_config.samsaraProgramId));
 
     // Derive all addresses locally (pure PDA math, no RPC)
     final navMintKey = Ed25519HDPublicKey.fromBase58(market.navMint);
@@ -53,21 +59,40 @@ class SamsaraClient {
 
     final marketMetaKey =
         Ed25519HDPublicKey.fromBase58(market.marketMetadata);
-    final personalPosition = await mayflowerPda.personalPosition(
+    final personalPositionKey = await mayflowerPda.personalPosition(
         marketMeta: marketMetaKey, owner: ownerKey);
     final escrow = (await mayflowerPda.personalPositionEscrow(
-        personalPosition: personalPosition)).toBase58();
+        personalPosition: personalPositionKey)).toBase58();
+    final personalPosition = personalPositionKey.toBase58();
+
+    // Derive Samsara gov account and prANA escrow
+    final samsaraMarketKey =
+        Ed25519HDPublicKey.fromBase58(market.samsaraMarket);
+    final govAccountKey = await samsaraPda.personalGovAccount(
+        market: samsaraMarketKey, owner: ownerKey);
+    final pranaEscrow = (await samsaraPda.personalGovPranaEscrow(
+        govAccount: govAccountKey)).toBase58();
+    final govAccount = govAccountKey.toBase58();
 
     final isNativeSol = market.baseMint == _nativeSolMint;
 
     // Build account list for batch fetch
+    // Order: wallet, navAta, escrow, [baseAta], pranaEscrow, govAccount, personalPosition
     final addresses = <String>[userPubkey, navAta, escrow];
+    int? baseAtaIdx;
     if (!isNativeSol) {
       final baseMintKey = Ed25519HDPublicKey.fromBase58(market.baseMint);
       final baseAta = (await findAssociatedTokenAddress(
           owner: ownerKey, mint: baseMintKey)).toBase58();
+      baseAtaIdx = addresses.length;
       addresses.add(baseAta);
     }
+    final pranaEscrowIdx = addresses.length;
+    addresses.add(pranaEscrow);
+    final govAccountIdx = addresses.length;
+    addresses.add(govAccount);
+    final personalPositionIdx = addresses.length;
+    addresses.add(personalPosition);
 
     // Single batched RPC call
     final accounts = await _rpcClient.getMultipleAccounts(
@@ -84,7 +109,7 @@ class SamsaraClient {
       final lamports = walletAccount?['lamports'] as int? ?? 0;
       baseBalance = lamports / _pow10(market.baseDecimals);
     } else {
-      final baseAtaAccount = accounts[3];
+      final baseAtaAccount = accounts[baseAtaIdx!];
       baseBalance = _parseTokenAmountFromAccountData(
           baseAtaAccount, market.baseDecimals);
     }
@@ -95,6 +120,12 @@ class SamsaraClient {
       '${market.name}_deposited': _parseTokenAmountFromAccountData(
           escrowAccount, market.navDecimals),
       market.baseName: baseBalance,
+      'prANA_deposited': _parseTokenAmountFromAccountData(
+          accounts[pranaEscrowIdx], _pranaDecimals),
+      'rewards_unclaimed': _parseGovAccountRewards(
+          accounts[govAccountIdx], market.baseDecimals),
+      'debt': _parsePersonalPositionDebt(
+          accounts[personalPositionIdx], market.baseDecimals),
     };
   }
 
@@ -111,6 +142,8 @@ class SamsaraClient {
     final ownerKey = Ed25519HDPublicKey.fromBase58(userPubkey);
     final mayflowerPda = MayflowerPda(
         Ed25519HDPublicKey.fromBase58(_config.mayflowerProgramId));
+    final samsaraPda = SamsaraPda(
+        Ed25519HDPublicKey.fromBase58(_config.samsaraProgramId));
 
     // Derive all addresses locally for all markets
     // Track which addresses belong to which market
@@ -123,29 +156,54 @@ class SamsaraClient {
       final navMintKey = Ed25519HDPublicKey.fromBase58(market.navMint);
       final navAta = (await findAssociatedTokenAddress(
           owner: ownerKey, mint: navMintKey)).toBase58();
-      addresses.add(navAta);
+      addresses.add(navAta); // +0
 
       final marketMetaKey =
           Ed25519HDPublicKey.fromBase58(market.marketMetadata);
-      final personalPosition = await mayflowerPda.personalPosition(
+      final personalPositionKey = await mayflowerPda.personalPosition(
           marketMeta: marketMetaKey, owner: ownerKey);
       final escrow = (await mayflowerPda.personalPositionEscrow(
-          personalPosition: personalPosition)).toBase58();
-      addresses.add(escrow);
+          personalPosition: personalPositionKey)).toBase58();
+      addresses.add(escrow); // +1
 
-      String? baseAta;
+      // Track index offsets from startIndex
+      int nextOffset = 2;
+      int? baseAtaOffset;
       if (market.baseMint != _nativeSolMint) {
         final baseMintKey = Ed25519HDPublicKey.fromBase58(market.baseMint);
-        baseAta = (await findAssociatedTokenAddress(
+        final baseAta = (await findAssociatedTokenAddress(
             owner: ownerKey, mint: baseMintKey)).toBase58();
         addresses.add(baseAta);
+        baseAtaOffset = nextOffset;
+        nextOffset++;
       }
+
+      // Derive Samsara gov account and prANA escrow
+      final samsaraMarketKey =
+          Ed25519HDPublicKey.fromBase58(market.samsaraMarket);
+      final govAccountKey = await samsaraPda.personalGovAccount(
+          market: samsaraMarketKey, owner: ownerKey);
+      final pranaEscrow = (await samsaraPda.personalGovPranaEscrow(
+          govAccount: govAccountKey)).toBase58();
+      addresses.add(pranaEscrow); // prANA escrow
+      final pranaEscrowOffset = nextOffset;
+      nextOffset++;
+
+      addresses.add(govAccountKey.toBase58()); // gov account
+      final govAccountOffset = nextOffset;
+      nextOffset++;
+
+      addresses.add(personalPositionKey.toBase58()); // personal position
+      final personalPositionOffset = nextOffset;
 
       marketSlices.add(_MarketSlice(
         market: market,
         navAtaIndex: startIndex,
         escrowIndex: startIndex + 1,
-        baseAtaIndex: baseAta != null ? startIndex + 2 : null,
+        baseAtaIndex: baseAtaOffset != null ? startIndex + baseAtaOffset : null,
+        pranaEscrowIndex: startIndex + pranaEscrowOffset,
+        govAccountIndex: startIndex + govAccountOffset,
+        personalPositionIndex: startIndex + personalPositionOffset,
       ));
     }
 
@@ -177,6 +235,12 @@ class SamsaraClient {
         '${market.name}_deposited': _parseTokenAmountFromAccountData(
             escrowAccount, market.navDecimals),
         market.baseName: baseBalance,
+        'prANA_deposited': _parseTokenAmountFromAccountData(
+            accounts[slice.pranaEscrowIndex], _pranaDecimals),
+        'rewards_unclaimed': _parseGovAccountRewards(
+            accounts[slice.govAccountIndex], market.baseDecimals),
+        'debt': _parsePersonalPositionDebt(
+            accounts[slice.personalPositionIndex], market.baseDecimals),
       };
     }
 
@@ -185,6 +249,7 @@ class SamsaraClient {
 
   static const _nativeSolMint =
       'So11111111111111111111111111111111111111112';
+  static const _pranaDecimals = 6;
 
   /// Parses an SPL token amount from raw account data.
   ///
@@ -216,6 +281,116 @@ class SamsaraClient {
       result *= 10;
     }
     return result;
+  }
+
+  /// Parses unclaimed rewards from a GovAccount's raw account data.
+  ///
+  /// GovAccount layout (435 bytes, Samsara program):
+  ///   - Bytes 0-7: discriminator [37, 169, 199, 114, 141, 109, 9, 167]
+  ///   - Bytes 8+: struct fields (pubkeys + u64 accumulators)
+  ///
+  /// The unclaimed rewards offset is TBD — returns 0.0 until the offset
+  /// is confirmed via on-chain data inspection. Use [dumpGovAccountFields]
+  /// to discover the correct offset.
+  static double _parseGovAccountRewards(
+      Map<String, dynamic>? account, int baseDecimals) {
+    if (account == null || account['data'] == null) return 0.0;
+
+    final dataArray = account['data'] as List<dynamic>?;
+    if (dataArray == null || dataArray.isEmpty) return 0.0;
+
+    final base64Data = dataArray[0] as String?;
+    if (base64Data == null || base64Data.isEmpty) return 0.0;
+
+    final bytes = base64Decode(base64Data);
+    if (bytes.length < 435) return 0.0;
+
+    // TODO: Confirm offset via on-chain data inspection.
+    // GovAccount has 435 bytes. After discriminator (8) + pubkey fields,
+    // the u64 accumulators follow. Use dumpGovAccountFields() to identify
+    // which u64 holds the unclaimed rewards.
+    return 0.0;
+  }
+
+  /// Parses borrow debt from a PersonalPosition's raw account data.
+  ///
+  /// PersonalPosition layout (~121 bytes, Mayflower program):
+  ///   - Bytes 0-7: discriminator [40, 172, 123, 89, 170, 15, 56, 141]
+  ///   - Bytes 8+: struct fields
+  ///
+  /// The debt offset is TBD — returns 0.0 until the offset is confirmed
+  /// via on-chain data inspection. Use [dumpPersonalPositionFields] to
+  /// discover the correct offset.
+  static double _parsePersonalPositionDebt(
+      Map<String, dynamic>? account, int baseDecimals) {
+    if (account == null || account['data'] == null) return 0.0;
+
+    final dataArray = account['data'] as List<dynamic>?;
+    if (dataArray == null || dataArray.isEmpty) return 0.0;
+
+    final base64Data = dataArray[0] as String?;
+    if (base64Data == null || base64Data.isEmpty) return 0.0;
+
+    final bytes = base64Decode(base64Data);
+    if (bytes.length < 72) return 0.0; // at least disc + 2 pubkeys
+
+    // TODO: Confirm offset via on-chain data inspection.
+    // PersonalPosition has ~121 bytes. After discriminator (8) and pubkey
+    // fields, the u64 fields follow. Use dumpPersonalPositionFields() to
+    // identify which u64 holds the debt.
+    return 0.0;
+  }
+
+  /// Dumps all u64 fields from a GovAccount for offset discovery.
+  ///
+  /// Returns a map of offset → raw u64 value for every 8-byte aligned
+  /// position after the known pubkey fields.
+  static Map<int, int> dumpGovAccountFields(
+      Map<String, dynamic>? account) {
+    final fields = <int, int>{};
+    if (account == null || account['data'] == null) return fields;
+
+    final dataArray = account['data'] as List<dynamic>?;
+    if (dataArray == null || dataArray.isEmpty) return fields;
+
+    final base64Data = dataArray[0] as String?;
+    if (base64Data == null || base64Data.isEmpty) return fields;
+
+    final bytes = Uint8List.fromList(base64Decode(base64Data));
+    if (bytes.length < 72) return fields;
+
+    // GovAccount: disc(8) + market(32) + owner(32) = 72, then u64 fields
+    final bd = ByteData.sublistView(bytes);
+    for (int offset = 72; offset + 8 <= bytes.length; offset += 8) {
+      fields[offset] = bd.getUint64(offset, Endian.little);
+    }
+    return fields;
+  }
+
+  /// Dumps all u64 fields from a PersonalPosition for offset discovery.
+  ///
+  /// Returns a map of offset → raw u64 value for every 8-byte aligned
+  /// position after the known pubkey fields.
+  static Map<int, int> dumpPersonalPositionFields(
+      Map<String, dynamic>? account) {
+    final fields = <int, int>{};
+    if (account == null || account['data'] == null) return fields;
+
+    final dataArray = account['data'] as List<dynamic>?;
+    if (dataArray == null || dataArray.isEmpty) return fields;
+
+    final base64Data = dataArray[0] as String?;
+    if (base64Data == null || base64Data.isEmpty) return fields;
+
+    final bytes = Uint8List.fromList(base64Decode(base64Data));
+    if (bytes.length < 72) return fields;
+
+    // PersonalPosition: disc(8) + marketMeta(32) + owner(32) = 72, then fields
+    final bd = ByteData.sublistView(bytes);
+    for (int offset = 72; offset + 8 <= bytes.length; offset += 8) {
+      fields[offset] = bd.getUint64(offset, Endian.little);
+    }
+    return fields;
   }
 
   /// Fetches the floor price for a navToken market from on-chain data.
@@ -1156,11 +1331,17 @@ class _MarketSlice {
   final int navAtaIndex;
   final int escrowIndex;
   final int? baseAtaIndex; // null for native SOL markets
+  final int pranaEscrowIndex;
+  final int govAccountIndex;
+  final int personalPositionIndex;
 
   const _MarketSlice({
     required this.market,
     required this.navAtaIndex,
     required this.escrowIndex,
     this.baseAtaIndex,
+    required this.pranaEscrowIndex,
+    required this.govAccountIndex,
+    required this.personalPositionIndex,
   });
 }
