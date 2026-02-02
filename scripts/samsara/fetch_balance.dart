@@ -8,12 +8,14 @@ import 'package:nirvana_solana/src/rpc/solana_rpc_client.dart';
 
 /// Fetch navToken balances (wallet + staked) and base token balance for all markets.
 ///
-/// Usage: dart scripts/samsara/fetch_balance.dart <pubkey> [--market <name>] [--rpc <url>] [--verbose]
+/// Usage: dart scripts/samsara/fetch_balance.dart <pubkey> [--market <name>] [--active] [--rpc <url>] [--verbose]
 ///
 /// Without --market, fetches all markets. With --market, fetches only that market.
+/// With --active, only includes markets where the user has liquid or staked balance > 0.
 ///
 /// Examples:
 ///   dart scripts/samsara/fetch_balance.dart 7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU
+///   dart scripts/samsara/fetch_balance.dart 7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU --active
 ///   dart scripts/samsara/fetch_balance.dart 7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU --market navSOL --verbose
 ///
 /// Environment:
@@ -24,6 +26,7 @@ void main(List<String> args) async {
   String? marketName;
   String? userPubkey;
   bool verbose = false;
+  bool activeOnly = false;
 
   // Parse positional arg (pubkey) and flags
   for (var i = 0; i < args.length; i++) {
@@ -35,13 +38,15 @@ void main(List<String> args) async {
       i++;
     } else if (args[i] == '--verbose') {
       verbose = true;
+    } else if (args[i] == '--active') {
+      activeOnly = true;
     } else if (!args[i].startsWith('--') && userPubkey == null) {
       userPubkey = args[i];
     }
   }
 
   if (userPubkey == null) {
-    print('Usage: dart scripts/samsara/fetch_balance.dart <pubkey> [--market <name>] [--rpc <url>] [--verbose]');
+    print('Usage: dart scripts/samsara/fetch_balance.dart <pubkey> [--market <name>] [--active] [--rpc <url>] [--verbose]');
     print('');
     print('Available markets:');
     for (final name in NavTokenMarket.availableMarkets) {
@@ -102,21 +107,34 @@ void main(List<String> args) async {
     final resultList = <Map<String, dynamic>>[];
     for (final market in markets) {
       final balances = allBalances[market.name]!;
+      final liquid = balances[market.name]!;
+      final staked = balances['${market.name}_staked']!;
+
+      if (activeOnly && liquid == 0.0 && staked == 0.0) continue;
 
       if (verbose) {
         final navDecimals = market.navDecimals > 6 ? 8 : 6;
         final baseDecimals = market.baseDecimals > 6 ? 8 : 6;
         print('');
-        print('${market.name} (wallet): ${balances[market.name]!.toStringAsFixed(navDecimals)}');
-        print('${market.name} (staked): ${balances['${market.name}_staked']!.toStringAsFixed(navDecimals)}');
+        print('${market.name} (liquid): ${liquid.toStringAsFixed(navDecimals)}');
+        print('${market.name} (staked): ${staked.toStringAsFixed(navDecimals)}');
         print('${market.baseName}: ${balances[market.baseName]!.toStringAsFixed(baseDecimals)}');
       }
 
       resultList.add({
         'market': market.name,
-        market.name: balances[market.name],
-        '${market.name}_staked': balances['${market.name}_staked'],
-        market.baseName: balances[market.baseName],
+        'liquid': {
+          'currency': market.name,
+          'amount': liquid,
+        },
+        'staked': {
+          'currency': market.name,
+          'amount': staked,
+        },
+        'base': {
+          'currency': market.baseName,
+          'amount': balances[market.baseName],
+        },
       });
     }
 
