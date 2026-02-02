@@ -985,6 +985,102 @@ class SamsaraTransactionBuilder {
     );
   }
 
+  /// Build Mayflower withdraw instruction (withdraws navToken from personal position escrow)
+  ///
+  /// Withdraws navToken (e.g., navSOL) from the market's personal position
+  /// escrow back to the user's wallet ATA. Same 10 accounts as deposit,
+  /// different discriminator.
+  ///
+  /// Based on browser interception of withdraw transaction from navSOL market.
+  Instruction buildWithdrawNavTokenInstruction({
+    required String userPubkey,
+    required String userNavTokenAccount,
+    required String personalPosition,
+    required String userShares,
+    required NavTokenMarket market,
+    required int withdrawLamports,
+  }) {
+    // Build instruction data: discriminator + withdraw amount
+    final amountBytes = Uint8List(8);
+    amountBytes.buffer.asByteData().setUint64(0, withdrawLamports, Endian.little);
+
+    final instructionData = [
+      ...SamsaraDiscriminators.withdraw,
+      ...amountBytes,
+    ];
+
+    // Build accounts in exact order from intercepted withdraw transaction (10 accounts)
+    // Same layout as deposit instruction
+    final accounts = [
+      // 0: User Wallet (signer)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(userPubkey),
+        isSigner: true,
+        isWriteable: true,
+      ),
+      // 1: Market Metadata
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(market.marketMetadata),
+        isSigner: false,
+        isWriteable: false,
+      ),
+      // 2: navToken Mint
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(market.navMint),
+        isSigner: false,
+        isWriteable: false,
+      ),
+      // 3: Mayflower Market (writable)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(market.mayflowerMarket),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 4: Personal Position PDA (writable)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(personalPosition),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 5: User Shares / escrow PDA (writable)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(userShares),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 6: User navToken ATA (destination, writable)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(userNavTokenAccount),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 7: Token Program
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(_config.tokenProgram),
+        isSigner: false,
+        isWriteable: false,
+      ),
+      // 8: Authority PDA (writable)
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(market.authorityPda),
+        isSigner: false,
+        isWriteable: true,
+      ),
+      // 9: Mayflower Program
+      AccountMeta(
+        pubKey: Ed25519HDPublicKey.fromBase58(_config.mayflowerProgramId),
+        isSigner: false,
+        isWriteable: false,
+      ),
+    ];
+
+    return Instruction(
+      programId: Ed25519HDPublicKey.fromBase58(_config.mayflowerProgramId),
+      accounts: accounts,
+      data: ByteArray(Uint8List.fromList(instructionData)),
+    );
+  }
+
   /// Build CreateAssociatedTokenAccountIdempotent instruction
   Instruction buildCreateAtaIdempotentInstruction({
     required String payer,
