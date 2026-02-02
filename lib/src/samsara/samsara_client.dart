@@ -287,40 +287,34 @@ class SamsaraClient {
   ///
   /// GovAccount layout (435 bytes, Samsara program):
   ///   - Bytes 0-7: discriminator [37, 169, 199, 114, 141, 109, 9, 167]
-  ///   - Bytes 8+: struct fields (pubkeys + u64 accumulators)
+  ///   - Bytes 8-39: pubkey (market)
+  ///   - Bytes 40-71: pubkey (owner)
+  ///   - Bytes 72-103: pubkey (unknown)
+  ///   - Bytes 104-111: u64 (accumulator, not direct claimable amount)
+  ///   - Bytes 112-143: pubkey (unknown)
+  ///   - Bytes 144-151: u64 (26 observed — epoch or counter)
+  ///   - Bytes 152-434: zeros
   ///
-  /// The unclaimed rewards offset is TBD — returns 0.0 until the offset
-  /// is confirmed via on-chain data inspection. Use [dumpGovAccountFields]
-  /// to discover the correct offset.
+  /// Rewards are not stored as a simple claimable balance. The GovAccount
+  /// uses an accumulator model (reward-per-share) that requires the global
+  /// market state to compute the actual claimable amount. Returns 0.0
+  /// until a simulation-based approach is implemented.
+  // TODO: Implement via collectRevPrana simulation (similar to
+  // NirvanaClient.getClaimableRevshareViaSimulation).
   static double _parseGovAccountRewards(
       Map<String, dynamic>? account, int baseDecimals) {
-    if (account == null || account['data'] == null) return 0.0;
-
-    final dataArray = account['data'] as List<dynamic>?;
-    if (dataArray == null || dataArray.isEmpty) return 0.0;
-
-    final base64Data = dataArray[0] as String?;
-    if (base64Data == null || base64Data.isEmpty) return 0.0;
-
-    final bytes = base64Decode(base64Data);
-    if (bytes.length < 435) return 0.0;
-
-    // TODO: Confirm offset via on-chain data inspection.
-    // GovAccount has 435 bytes. After discriminator (8) + pubkey fields,
-    // the u64 accumulators follow. Use dumpGovAccountFields() to identify
-    // which u64 holds the unclaimed rewards.
     return 0.0;
   }
 
   /// Parses borrow debt from a PersonalPosition's raw account data.
   ///
-  /// PersonalPosition layout (~121 bytes, Mayflower program):
+  /// PersonalPosition layout (~120 bytes, Mayflower program):
   ///   - Bytes 0-7: discriminator [40, 172, 123, 89, 170, 15, 56, 141]
-  ///   - Bytes 8+: struct fields
-  ///
-  /// The debt offset is TBD — returns 0.0 until the offset is confirmed
-  /// via on-chain data inspection. Use [dumpPersonalPositionFields] to
-  /// discover the correct offset.
+  ///   - Bytes 8-39: pubkey (field 1)
+  ///   - Bytes 40-71: pubkey (field 2)
+  ///   - Bytes 72-103: pubkey (field 3)
+  ///   - Bytes 104-111: u64 (deposited navToken shares)
+  ///   - Bytes 112-119: u64 (debt in base token lamports)
   static double _parsePersonalPositionDebt(
       Map<String, dynamic>? account, int baseDecimals) {
     if (account == null || account['data'] == null) return 0.0;
@@ -332,13 +326,15 @@ class SamsaraClient {
     if (base64Data == null || base64Data.isEmpty) return 0.0;
 
     final bytes = base64Decode(base64Data);
-    if (bytes.length < 72) return 0.0; // at least disc + 2 pubkeys
+    // Need at least 120 bytes: disc(8) + 3 pubkeys(96) + shares(8) + debt(8)
+    if (bytes.length < 120) return 0.0;
 
-    // TODO: Confirm offset via on-chain data inspection.
-    // PersonalPosition has ~121 bytes. After discriminator (8) and pubkey
-    // fields, the u64 fields follow. Use dumpPersonalPositionFields() to
-    // identify which u64 holds the debt.
-    return 0.0;
+    // Read debt u64 at offset 112
+    final byteData = ByteData.sublistView(
+        Uint8List.fromList(bytes), 112, 120);
+    final debtLamports = byteData.getUint64(0, Endian.little);
+
+    return debtLamports / _pow10(baseDecimals);
   }
 
   /// Dumps all u64 fields from a GovAccount for offset discovery.
