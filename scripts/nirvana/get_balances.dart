@@ -80,13 +80,10 @@ void main(List<String> args) async {
       'ANA': stakedAna,
       'prANA': personalInfo?.stakedPrana ?? 0.0,
     },
-    'debt': {
-      'NIRV': debt,
-    },
-    'borrowable': {
-      'NIRV': borrowable,
-      'floorPrice': floorPrice,
-      'borrowLimit': borrowLimit,
+    'borrow': {
+      'debt': debt,
+      'limit': borrowLimit,
+      'available': borrowable,
     },
     'claimable': {
       'prANA': claimablePrana,
@@ -106,11 +103,10 @@ void main(List<String> args) async {
       LogService.log('\n=== Staking Position ===');
       LogService.log('  Staked ANA:   ${personalInfo.stakedAna.toStringAsFixed(6)}');
       LogService.log('  Staked prANA: ${personalInfo.stakedPrana.toStringAsFixed(6)}');
-      LogService.log('  NIRV Debt:    ${personalInfo.anaDebt.toStringAsFixed(6)}');
-      LogService.log('\n=== Borrow Capacity ===');
-      LogService.log('  Floor Price:  \$${floorPrice.toStringAsFixed(6)}');
-      LogService.log('  Borrow Limit: ${borrowLimit.toStringAsFixed(6)} NIRV');
-      LogService.log('  Borrowable:   ${borrowable.toStringAsFixed(6)} NIRV');
+      LogService.log('\n=== Borrow ===');
+      LogService.log('  Debt:       ${debt.toStringAsFixed(6)} NIRV');
+      LogService.log('  Limit:      ${borrowLimit.toStringAsFixed(6)} NIRV');
+      LogService.log('  Available:  ${borrowable.toStringAsFixed(6)} NIRV');
       LogService.log('\n=== Claimable ===');
       LogService.log('  prANA: ${claimablePrana.toStringAsFixed(6)}');
       LogService.log('\n=== Claimable Revenue Share ===');
