@@ -16,14 +16,14 @@ import 'package:solana/solana.dart';
 
 void main(List<String> args) async {
   if (args.isEmpty) {
-    print('Usage: dart scripts/parse_transaction.dart <signature> [--rpc <url>] [--verbose]');
-    print('');
-    print('Options:');
-    print('  --rpc <url>  Custom RPC endpoint');
-    print('  --verbose    Show detailed output before JSON result');
-    print('');
-    print('Environment:');
-    print('  SOLANA_RPC_URL  RPC endpoint (overridden by --rpc)');
+    LogService.log('Usage: dart scripts/parse_transaction.dart <signature> [--rpc <url>] [--verbose]');
+    LogService.log('');
+    LogService.log('Options:');
+    LogService.log('  --rpc <url>  Custom RPC endpoint');
+    LogService.log('  --verbose    Show detailed output before JSON result');
+    LogService.log('');
+    LogService.log('Environment:');
+    LogService.log('  SOLANA_RPC_URL  RPC endpoint (overridden by --rpc)');
     exit(1);
   }
 
@@ -40,38 +40,38 @@ void main(List<String> args) async {
   }
 
   // Create client
-  if (verbose) print('RPC: $rpcUrl');
+  if (verbose) LogService.log('RPC: $rpcUrl');
   final client = NirvanaClient.fromRpcUrl(rpcUrl);
 
-  if (verbose) print('\nParsing transaction: $signature');
+  if (verbose) LogService.log('\nParsing transaction: $signature');
 
   try {
     final tx = await client.parseTransaction(signature);
 
     if (verbose) {
-      print('');
-      print('  Type: ${tx.type.name.toUpperCase()}');
+      LogService.log('');
+      LogService.log('  Type: ${tx.type.name.toUpperCase()}');
       for (final s in tx.sent) {
-        print('  Sent: ${s.amount.toStringAsFixed(6)} ${s.currency}');
+        LogService.log('  Sent: ${s.amount.toStringAsFixed(6)} ${s.currency}');
       }
       for (final r in tx.received) {
-        print('  Received: ${r.amount.toStringAsFixed(6)} ${r.currency}');
+        LogService.log('  Received: ${r.amount.toStringAsFixed(6)} ${r.currency}');
       }
-      if (tx.fee != null) print('  Fee: ${tx.fee!.amount.toStringAsFixed(6)} ${tx.fee!.currency}');
-      if (tx.pricePerAna != null) print('  Price: \$${tx.pricePerAna!.toStringAsFixed(6)} per ANA');
-      print('  Timestamp: ${tx.timestamp.toIso8601String()}');
-      print('  User: ${tx.userAddress}');
-      print('');
+      if (tx.fee != null) LogService.log('  Fee: ${tx.fee!.amount.toStringAsFixed(6)} ${tx.fee!.currency}');
+      if (tx.pricePerAna != null) LogService.log('  Price: \$${tx.pricePerAna!.toStringAsFixed(6)} per ANA');
+      LogService.log('  Timestamp: ${tx.timestamp.toIso8601String()}');
+      LogService.log('  User: ${tx.userAddress}');
+      LogService.log('');
     }
 
     // Output JSON result
-    print(jsonEncode(tx.toJson()));
+    LogService.log(jsonEncode(tx.toJson()));
   } catch (e) {
     if (verbose) {
-      print('\n❌ Failed to parse transaction!');
-      print('  Error: $e');
+      LogService.log('\n❌ Failed to parse transaction!');
+      LogService.log('  Error: $e');
     }
-    print(jsonEncode({'success': false, 'error': e.toString()}));
+    LogService.log(jsonEncode({'success': false, 'error': e.toString()}));
     exit(1);
   }
 }

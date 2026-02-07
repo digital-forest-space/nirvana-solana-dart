@@ -1,3 +1,4 @@
+import 'package:nirvana_solana/src/utils/log_service.dart';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:solana/solana.dart';
@@ -22,23 +23,23 @@ void main() async {
   const targetAccount3 = 'Gvj2W5XvB611ZJqZvAWdTUcD2uB2UkfFqgv3R4ico6gw';
   final targetDiscriminator = [37, 169, 199, 114, 141, 109, 9, 167];
 
-  print('=' * 70);
-  print('GovAccount PDA Derivation Test');
-  print('=' * 70);
-  print('Samsara program: SAMmdq34d9RJoqoqfnGhMRUvZumQriaT55eGzXeAQj7');
-  print('Owner:           YOUR_WALLET_ADDRESS_HERE');
-  print('Market:          4KnomWX4ga9qmDdQN9GctJKjEnwLQTNWWHs57MyYtmYc');
-  print('Target (Acct 3): $targetAccount3');
-  print('Target disc:     $targetDiscriminator');
-  print('');
+  LogService.log('=' * 70);
+  LogService.log('GovAccount PDA Derivation Test');
+  LogService.log('=' * 70);
+  LogService.log('Samsara program: SAMmdq34d9RJoqoqfnGhMRUvZumQriaT55eGzXeAQj7');
+  LogService.log('Owner:           YOUR_WALLET_ADDRESS_HERE');
+  LogService.log('Market:          4KnomWX4ga9qmDdQN9GctJKjEnwLQTNWWHs57MyYtmYc');
+  LogService.log('Target (Acct 3): $targetAccount3');
+  LogService.log('Target disc:     $targetDiscriminator');
+  LogService.log('');
 
   // =========================================================================
   // Part 1: PDA Derivation
   // =========================================================================
-  print('=' * 70);
-  print('PART 1: PDA DERIVATION ATTEMPTS');
-  print('=' * 70);
-  print('');
+  LogService.log('=' * 70);
+  LogService.log('PART 1: PDA DERIVATION ATTEMPTS');
+  LogService.log('=' * 70);
+  LogService.log('');
 
   final seedCombinations = <String, List<List<int>>>{
     '["gov_account", market, owner]': [
@@ -135,35 +136,35 @@ void main() async {
       if (matched) foundMatch = true;
 
       final marker = matched ? '  >>> MATCH <<<' : '';
-      print('Seeds: ${entry.key}');
-      print('  Derived: $derived$marker');
-      print('');
+      LogService.log('Seeds: ${entry.key}');
+      LogService.log('  Derived: $derived$marker');
+      LogService.log('');
     } catch (e) {
-      print('Seeds: ${entry.key}');
-      print('  ERROR: $e');
-      print('');
+      LogService.log('Seeds: ${entry.key}');
+      LogService.log('  ERROR: $e');
+      LogService.log('');
     }
   }
 
   if (!foundMatch) {
-    print('*** No PDA match found for Account 3 ***');
+    LogService.log('*** No PDA match found for Account 3 ***');
   }
-  print('');
+  LogService.log('');
 
   // =========================================================================
   // Part 2: Anchor Account Discriminator Verification
   // =========================================================================
-  print('=' * 70);
-  print('PART 2: ANCHOR ACCOUNT DISCRIMINATOR CHECK');
-  print('=' * 70);
-  print('');
-  print('Target discriminator (first 8 bytes of Account 3):');
-  print('  $targetDiscriminator');
+  LogService.log('=' * 70);
+  LogService.log('PART 2: ANCHOR ACCOUNT DISCRIMINATOR CHECK');
+  LogService.log('=' * 70);
+  LogService.log('');
+  LogService.log('Target discriminator (first 8 bytes of Account 3):');
+  LogService.log('  $targetDiscriminator');
   final targetHex = targetDiscriminator
       .map((b) => b.toRadixString(16).padLeft(2, '0'))
       .join(' ');
-  print('  hex: $targetHex');
-  print('');
+  LogService.log('  hex: $targetHex');
+  LogService.log('');
 
   final discriminatorCandidates = [
     'account:GovAccount',
@@ -183,10 +184,10 @@ void main() async {
         .map((b) => b.toRadixString(16).padLeft(2, '0'))
         .join(' ');
     final marker = matched ? '  >>> MATCH <<<' : '';
-    print('sha256("$candidate"):');
-    print('  first 8 bytes: $first8');
-    print('  hex: $hexStr$marker');
-    print('');
+    LogService.log('sha256("$candidate"):');
+    LogService.log('  first 8 bytes: $first8');
+    LogService.log('  hex: $hexStr$marker');
+    LogService.log('');
   }
 }
 

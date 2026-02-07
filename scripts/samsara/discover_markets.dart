@@ -1,3 +1,4 @@
+import 'package:nirvana_solana/src/utils/log_service.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -51,14 +52,14 @@ void main(List<String> args) async {
   final config = SamsaraConfig.mainnet();
   final pda = SamsaraPda.mainnet();
 
-  if (verbose) print('Fetching all Mayflower Market accounts...\n');
+  if (verbose) LogService.log('Fetching all Mayflower Market accounts...\n');
 
   final mayflowerMarkets = await rpcClient.getProgramAccounts(
     config.mayflowerProgramId,
     dataSize: 304,
   );
 
-  if (verbose) print('Found ${mayflowerMarkets.length} markets\n');
+  if (verbose) LogService.log('Found ${mayflowerMarkets.length} markets\n');
 
   // Collect all nav and base mints for batch metadata lookup
   final results = <Map<String, dynamic>>[];
@@ -112,7 +113,7 @@ void main(List<String> args) async {
   }
 
   // Resolve Metaplex token metadata for all mints
-  if (verbose) print('Resolving token names for ${allMints.length} mints...\n');
+  if (verbose) LogService.log('Resolving token names for ${allMints.length} mints...\n');
   final tokenNames = await _resolveTokenNames(rpcClient, allMints.toList());
 
   // Attach names to results
@@ -158,7 +159,7 @@ void main(List<String> args) async {
 
   // Health signals: nav supply, vault balance, transaction recency
   if (health) {
-    if (verbose) print('Fetching health signals for ${results.length} markets...\n');
+    if (verbose) LogService.log('Fetching health signals for ${results.length} markets...\n');
     for (final m in results) {
       await _fetchHealthSignals(m, rpcClient, uri, verbose);
     }
@@ -175,56 +176,56 @@ void main(List<String> args) async {
       (b['floorPrice'] as double).compareTo(a['floorPrice'] as double));
 
   if (verbose) {
-    print('=== Discovered Markets ===\n');
+    LogService.log('=== Discovered Markets ===\n');
     for (final m in results) {
       final navLabel = m['navSymbol'] ?? m['navMint'];
       final baseLabel = m['baseSymbol'] ?? m['baseMint'];
-      print('$navLabel / $baseLabel  (floor: ${(m['floorPrice'] as double).toStringAsFixed(9)})');
+      LogService.log('$navLabel / $baseLabel  (floor: ${(m['floorPrice'] as double).toStringAsFixed(9)})');
       if (m['navName'] != null) {
-        print('  Nav Token:        ${m['navName']} (${m['navSymbol']})');
+        LogService.log('  Nav Token:        ${m['navName']} (${m['navSymbol']})');
       }
       if (m['baseName'] != null) {
-        print('  Base Token:       ${m['baseName']} (${m['baseSymbol']})');
+        LogService.log('  Base Token:       ${m['baseName']} (${m['baseSymbol']})');
       }
-      print('  Mayflower Market: ${m['mayflowerMarket']}');
-      print('  Samsara Market:   ${m['samsaraMarket']}');
-      print('  Market Metadata:  ${m['marketMetadata']}');
-      print('  Base Mint:        ${m['baseMint']}');
-      print('  Nav Mint:         ${m['navMint']}');
-      print('  Market Group:     ${m['marketGroup']}');
-      print('  Base Vault:       ${m['baseVault']}');
-      print('  Nav Vault:        ${m['navVault']}');
-      print('  Fee Vault:        ${m['feeVault']}');
+      LogService.log('  Mayflower Market: ${m['mayflowerMarket']}');
+      LogService.log('  Samsara Market:   ${m['samsaraMarket']}');
+      LogService.log('  Market Metadata:  ${m['marketMetadata']}');
+      LogService.log('  Base Mint:        ${m['baseMint']}');
+      LogService.log('  Nav Mint:         ${m['navMint']}');
+      LogService.log('  Market Group:     ${m['marketGroup']}');
+      LogService.log('  Base Vault:       ${m['baseVault']}');
+      LogService.log('  Nav Vault:        ${m['navVault']}');
+      LogService.log('  Fee Vault:        ${m['feeVault']}');
       final supported = m['supported'] as bool;
       final configMatch = m['configMatch'];
-      print('  Supported:        $supported');
+      LogService.log('  Supported:        $supported');
       if (supported) {
         if (configMatch == true) {
-          print('  Config Match:     true');
+          LogService.log('  Config Match:     true');
         } else {
           final mismatches = m['configMismatches'] as List<String>? ?? [];
-          print('  Config Match:     FALSE -- mismatches: ${mismatches.join(", ")}');
+          LogService.log('  Config Match:     FALSE -- mismatches: ${mismatches.join(", ")}');
         }
       }
       if (health) {
         final supply = m['navSupply'];
         final vaultBal = m['baseVaultBalance'];
         final lastTx = m['lastTxTime'] as int?;
-        print('  Nav Supply:       ${supply != null ? supply.toStringAsFixed(4) : 'n/a'}');
-        print('  Vault Balance:    ${vaultBal != null ? vaultBal.toStringAsFixed(8) : 'n/a'}');
+        LogService.log('  Nav Supply:       ${supply != null ? supply.toStringAsFixed(4) : 'n/a'}');
+        LogService.log('  Vault Balance:    ${vaultBal != null ? vaultBal.toStringAsFixed(8) : 'n/a'}');
         if (lastTx != null) {
           final age = DateTime.now().difference(
               DateTime.fromMillisecondsSinceEpoch(lastTx * 1000));
-          print('  Last Tx:          ${_formatAge(age)} ago');
+          LogService.log('  Last Tx:          ${_formatAge(age)} ago');
         } else {
-          print('  Last Tx:          n/a');
+          LogService.log('  Last Tx:          n/a');
         }
       }
-      print('');
+      LogService.log('');
     }
   }
 
-  print(jsonEncode(results));
+  LogService.log(jsonEncode(results));
   exit(0);
 }
 
@@ -283,7 +284,7 @@ Future<void> _fetchHealthSignals(
 
   if (verbose) {
     final label = market['navSymbol'] ?? market['navMint'];
-    print('  $label: supply=${market['navSupply']}, '
+    LogService.log('  $label: supply=${market['navSupply']}, '
         'vault=${market['baseVaultBalance']}, '
         'lastTx=${market['lastTxTime']}');
   }

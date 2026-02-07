@@ -1,3 +1,4 @@
+import 'package:nirvana_solana/src/utils/log_service.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -21,17 +22,17 @@ import 'package:nirvana_solana/src/rpc/solana_rpc_client.dart';
 
 void main(List<String> args) async {
   if (args.length < 2) {
-    print('Usage: dart scripts/samsara/deposit_prana.dart <keypair_path> <prana_amount> [options]');
-    print('');
-    print('Options:');
+    LogService.log('Usage: dart scripts/samsara/deposit_prana.dart <keypair_path> <prana_amount> [options]');
+    LogService.log('');
+    LogService.log('Options:');
     final depositMarkets = NavTokenMarket.all.values.where((m) => m.samsaraMarket.isNotEmpty).map((m) => m.name).toList();
-    print('  --market <name>  Market name (default: navSOL). Available: ${depositMarkets.join(", ")}');
-    print('  --rpc <url>      Custom RPC endpoint');
-    print('  --verbose        Show detailed output before JSON result');
-    print('  --dry-run        Build transaction but don\'t send');
-    print('');
-    print('Environment:');
-    print('  SOLANA_RPC_URL  RPC endpoint (overridden by --rpc)');
+    LogService.log('  --market <name>  Market name (default: navSOL). Available: ${depositMarkets.join(", ")}');
+    LogService.log('  --rpc <url>      Custom RPC endpoint');
+    LogService.log('  --verbose        Show detailed output before JSON result');
+    LogService.log('  --dry-run        Build transaction but don\'t send');
+    LogService.log('');
+    LogService.log('Environment:');
+    LogService.log('  SOLANA_RPC_URL  RPC endpoint (overridden by --rpc)');
     exit(1);
   }
 
@@ -57,7 +58,7 @@ void main(List<String> args) async {
   }
 
   if (pranaAmount == null || pranaAmount <= 0) {
-    print(jsonEncode({'success': false, 'error': 'Invalid prANA amount: ${args[1]}'}));
+    LogService.log(jsonEncode({'success': false, 'error': 'Invalid prANA amount: ${args[1]}'}));
     exit(1);
   }
 
@@ -65,7 +66,7 @@ void main(List<String> args) async {
   final market = NavTokenMarket.byName(marketName);
   if (market == null) {
     final depositMarkets = NavTokenMarket.all.values.where((m) => m.samsaraMarket.isNotEmpty).map((m) => m.name).toList();
-    print(jsonEncode({
+    LogService.log(jsonEncode({
       'success': false,
       'error': 'Unknown market: $marketName',
       'available': depositMarkets,
@@ -75,7 +76,7 @@ void main(List<String> args) async {
 
   if (market.samsaraMarket.isEmpty) {
     final depositMarkets = NavTokenMarket.all.values.where((m) => m.samsaraMarket.isNotEmpty).map((m) => m.name).toList();
-    print(jsonEncode({
+    LogService.log(jsonEncode({
       'success': false,
       'error': 'Samsara market address not configured for ${market.name}. Available: ${depositMarkets.join(", ")}',
     }));
@@ -85,21 +86,21 @@ void main(List<String> args) async {
   // Load keypair
   final keypairFile = File(keypairPath);
   if (!keypairFile.existsSync()) {
-    print(jsonEncode({'success': false, 'error': 'Keypair file not found: $keypairPath'}));
+    LogService.log(jsonEncode({'success': false, 'error': 'Keypair file not found: $keypairPath'}));
     exit(1);
   }
 
-  if (verbose) print('Loading keypair from $keypairPath...');
+  if (verbose) LogService.log('Loading keypair from $keypairPath...');
   final keypairJson = keypairFile.readAsStringSync();
   final keypairBytes = RegExp(r'\d+').allMatches(keypairJson).map((m) => int.parse(m.group(0)!)).toList();
   final keypair = await Ed25519HDKeyPair.fromPrivateKeyBytes(
     privateKey: keypairBytes.sublist(0, 32),
   );
   final userPubkey = keypair.publicKey.toBase58();
-  if (verbose) print('Wallet: $userPubkey');
+  if (verbose) LogService.log('Wallet: $userPubkey');
 
   // Create SamsaraClient
-  if (verbose) print('RPC: $rpcUrl');
+  if (verbose) LogService.log('RPC: $rpcUrl');
   final uri = Uri.parse(rpcUrl);
   final wsUrl = Uri.parse(rpcUrl.replaceFirst('https', 'wss'));
   final solanaClient = SolanaClient(
@@ -113,17 +114,17 @@ void main(List<String> args) async {
   final pranaLamports = (pranaAmount * 1e6).round();
 
   if (verbose) {
-    print('\nTransaction:');
-    print('  Market: ${market.name}');
-    print('  Amount: $pranaAmount prANA ($pranaLamports lamports)');
+    LogService.log('\nTransaction:');
+    LogService.log('  Market: ${market.name}');
+    LogService.log('  Amount: $pranaAmount prANA ($pranaLamports lamports)');
   }
 
   // Get recent blockhash
   final blockhash = await rpcClient.getLatestBlockhash();
-  if (verbose) print('  Blockhash: $blockhash');
+  if (verbose) LogService.log('  Blockhash: $blockhash');
 
   // Build unsigned transaction via SamsaraClient
-  if (verbose) print('\nBuilding transaction...');
+  if (verbose) LogService.log('\nBuilding transaction...');
   final unsignedTxBytes = await client.buildUnsignedDepositPranaTransaction(
     userPubkey: userPubkey,
     market: market,
@@ -132,9 +133,9 @@ void main(List<String> args) async {
   );
 
   if (dryRun) {
-    if (verbose) print('\nDry run - transaction not sent');
+    if (verbose) LogService.log('\nDry run - transaction not sent');
     final txBase64 = base64Encode(unsignedTxBytes);
-    print(jsonEncode({
+    LogService.log(jsonEncode({
       'success': true,
       'dryRun': true,
       'transaction': txBase64,
@@ -146,7 +147,7 @@ void main(List<String> args) async {
   }
 
   // Sign and send transaction
-  if (verbose) print('\nSigning and sending transaction...');
+  if (verbose) LogService.log('\nSigning and sending transaction...');
 
   try {
     final signedTxBytes = await _signTransaction(unsignedTxBytes, keypair);
@@ -157,12 +158,12 @@ void main(List<String> args) async {
     );
 
     if (verbose) {
-      print('\nTransaction sent!');
-      print('  Signature: $signature');
-      print('  Explorer: https://solscan.io/tx/$signature');
+      LogService.log('\nTransaction sent!');
+      LogService.log('  Signature: $signature');
+      LogService.log('  Explorer: https://solscan.io/tx/$signature');
     }
 
-    print(jsonEncode({
+    LogService.log(jsonEncode({
       'success': true,
       'signature': signature,
       'market': market.name,
@@ -172,10 +173,10 @@ void main(List<String> args) async {
     }));
   } catch (e) {
     if (verbose) {
-      print('\nTransaction failed!');
-      print('  Error: $e');
+      LogService.log('\nTransaction failed!');
+      LogService.log('  Error: $e');
     }
-    print(jsonEncode({
+    LogService.log(jsonEncode({
       'success': false,
       'error': e.toString(),
     }));

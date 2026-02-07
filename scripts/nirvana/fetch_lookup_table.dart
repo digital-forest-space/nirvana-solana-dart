@@ -1,6 +1,7 @@
 // Fetches and decodes an Address Lookup Table from Solana
 // Usage: dart run scripts/fetch_lookup_table.dart <lookup_table_address> [--rpc <url>]
 
+import 'package:nirvana_solana/src/utils/log_service.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -34,10 +35,10 @@ const knownAddresses = {
 
 Future<void> main(List<String> args) async {
   if (args.isEmpty) {
-    print('Usage: dart run scripts/fetch_lookup_table.dart <lookup_table_address> [--rpc <url>]');
-    print('');
-    print('Example:');
-    print('  dart run scripts/fetch_lookup_table.dart HeTHfJCgHxpb1snGC5mk8M7bzs99kYAeMBuk9qHd3tMd');
+    LogService.log('Usage: dart run scripts/fetch_lookup_table.dart <lookup_table_address> [--rpc <url>]');
+    LogService.log('');
+    LogService.log('Example:');
+    LogService.log('  dart run scripts/fetch_lookup_table.dart HeTHfJCgHxpb1snGC5mk8M7bzs99kYAeMBuk9qHd3tMd');
     exit(1);
   }
 
@@ -52,25 +53,25 @@ Future<void> main(List<String> args) async {
     }
   }
 
-  print('Fetching lookup table: $lookupTableAddress');
-  print('RPC: $rpcUrl');
-  print('');
+  LogService.log('Fetching lookup table: $lookupTableAddress');
+  LogService.log('RPC: $rpcUrl');
+  LogService.log('');
 
   try {
     final addresses = await fetchLookupTable(rpcUrl, lookupTableAddress);
 
-    print('Lookup Table Contents (${addresses.length} addresses):');
-    print('=' * 80);
+    LogService.log('Lookup Table Contents (${addresses.length} addresses):');
+    LogService.log('=' * 80);
 
     for (var i = 0; i < addresses.length; i++) {
       final addr = addresses[i];
       final label = knownAddresses[addr] ?? '';
       final labelStr = label.isNotEmpty ? ' [$label]' : '';
-      print('  $i: $addr$labelStr');
+      LogService.log('  $i: $addr$labelStr');
     }
 
-    print('');
-    print('JSON output:');
+    LogService.log('');
+    LogService.log('JSON output:');
     final output = {
       'lookupTable': lookupTableAddress,
       'addresses': addresses.asMap().map((i, addr) => MapEntry(
@@ -81,9 +82,9 @@ Future<void> main(List<String> args) async {
         },
       )),
     };
-    print(JsonEncoder.withIndent('  ').convert(output));
+    LogService.log(JsonEncoder.withIndent('  ').convert(output));
   } catch (e) {
-    print('Error: $e');
+    LogService.log('Error: $e');
     exit(1);
   }
 }

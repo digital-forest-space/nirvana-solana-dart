@@ -46,7 +46,7 @@ void main(List<String> args) async {
   }
 
   // Create client
-  if (verbose) print('RPC: $rpcUrl');
+  if (verbose) LogService.log('RPC: $rpcUrl');
   final client = NirvanaClient.fromRpcUrl(rpcUrl);
 
   final totalStart = DateTime.now();
@@ -59,26 +59,26 @@ void main(List<String> args) async {
       try {
         cache = jsonDecode(cacheFileObj.readAsStringSync()) as Map<String, dynamic>;
         if (verbose) {
-          print('Cache: loaded from $_cacheFile');
-          print('  checkpoint: ${cache['newestCheckedSignature']}');
-          print('  price sig:  ${cache['signature']}');
-          print('  price: \$${cache['price']}');
+          LogService.log('Cache: loaded from $_cacheFile');
+          LogService.log('  checkpoint: ${cache['newestCheckedSignature']}');
+          LogService.log('  price sig:  ${cache['signature']}');
+          LogService.log('  price: \$${cache['price']}');
         }
       } catch (e) {
-        if (verbose) print('Cache: failed to load ($e)');
+        if (verbose) LogService.log('Cache: failed to load ($e)');
       }
     } else {
-      if (verbose) print('Cache: none found');
+      if (verbose) LogService.log('Cache: none found');
     }
 
-    if (verbose) print('\nFetching prices...');
+    if (verbose) LogService.log('\nFetching prices...');
 
     // Fetch floor price (always needed)
     final floorStart = DateTime.now();
     final floor = await client.fetchFloorPrice();
     if (verbose) {
       final elapsed = DateTime.now().difference(floorStart).inMilliseconds;
-      print('  fetchFloorPrice: ${elapsed}ms');
+      LogService.log('  fetchFloorPrice: ${elapsed}ms');
     }
 
     // Fetch ANA price with pagination
@@ -113,7 +113,7 @@ void main(List<String> args) async {
           firstPageNewestSig = result.newestCheckedSignature;
         }
 
-        print('${result.status.name}${result.signature != null ? ' (${result.signature!.substring(0, 8)}...)' : ''}');
+        LogService.log('${result.status.name}${result.signature != null ? ' (${result.signature!.substring(0, 8)}...)' : ''}');
 
         if (result.status != PriceResultStatus.limitReached) {
           break;
@@ -130,7 +130,7 @@ void main(List<String> args) async {
       }
 
       final elapsed = DateTime.now().difference(anaStart).inMilliseconds;
-      print('  fetchLatestAnaPrice: ${elapsed}ms');
+      LogService.log('  fetchLatestAnaPrice: ${elapsed}ms');
     } else {
       // Non-verbose: use convenience method that handles paging internally
       result = await client.fetchLatestAnaPriceWithPaging(
@@ -155,7 +155,7 @@ void main(List<String> args) async {
           anaPrice = cache['price'] as double;
           newPriceSignature = cache['signature'] as String?;
           newCheckpointSignature = cache['newestCheckedSignature'] as String?;
-          if (verbose) print('  -> no new transactions, cached price is current');
+          if (verbose) LogService.log('  -> no new transactions, cached price is current');
         }
         break;
 
@@ -167,7 +167,7 @@ void main(List<String> args) async {
           newPriceSignature = cache['signature'] as String?;
           // Use new checkpoint if available, otherwise result's checkpoint
           newCheckpointSignature ??= result.newestCheckedSignature;
-          if (verbose) print('  -> exhausted $maxPages pages, using cached price');
+          if (verbose) LogService.log('  -> exhausted $maxPages pages, using cached price');
         }
         break;
 
@@ -201,27 +201,27 @@ void main(List<String> args) async {
       'updatedAt': DateTime.now().toUtc().toIso8601String(),
     };
     cacheFileObj.writeAsStringSync(jsonEncode(newCache));
-    if (verbose) print('  Cache: saved to $_cacheFile');
+    if (verbose) LogService.log('  Cache: saved to $_cacheFile');
 
     if (verbose) {
       final totalElapsed = DateTime.now().difference(totalStart).inMilliseconds;
-      print('  Total: ${totalElapsed}ms');
-      print('');
-      print('  Floor: \$${prices.floor.toStringAsFixed(6)}');
-      print('  ANA:   \$${prices.ana.toStringAsFixed(6)}');
-      print('  prANA: \$${prices.prana.toStringAsFixed(6)}');
-      print('');
+      LogService.log('  Total: ${totalElapsed}ms');
+      LogService.log('');
+      LogService.log('  Floor: \$${prices.floor.toStringAsFixed(6)}');
+      LogService.log('  ANA:   \$${prices.ana.toStringAsFixed(6)}');
+      LogService.log('  prANA: \$${prices.prana.toStringAsFixed(6)}');
+      LogService.log('');
     }
 
     // Output JSON result
-    print(jsonEncode(prices.toJson()));
+    LogService.log(jsonEncode(prices.toJson()));
   } catch (e) {
     if (verbose) {
       final totalElapsed = DateTime.now().difference(totalStart).inMilliseconds;
-      print('\n❌ Failed to fetch prices! (${totalElapsed}ms)');
-      print('  Error: $e');
+      LogService.log('\n❌ Failed to fetch prices! (${totalElapsed}ms)');
+      LogService.log('  Error: $e');
     }
-    print(jsonEncode({'success': false, 'error': e.toString()}));
+    LogService.log(jsonEncode({'success': false, 'error': e.toString()}));
     exit(1);
   }
 }

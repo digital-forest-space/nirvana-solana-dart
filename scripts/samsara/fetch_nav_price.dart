@@ -1,3 +1,4 @@
+import 'package:nirvana_solana/src/utils/log_service.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'package:solana/solana.dart';
@@ -42,7 +43,7 @@ void main(List<String> args) async {
   if (marketName != null) {
     final market = NavTokenMarket.byName(marketName);
     if (market == null) {
-      print(jsonEncode({'success': false, 'error': 'Unknown market: $marketName'}));
+      LogService.log(jsonEncode({'success': false, 'error': 'Unknown market: $marketName'}));
       exit(1);
     }
     markets = [market];
@@ -54,8 +55,8 @@ void main(List<String> args) async {
       'https://api.mainnet-beta.solana.com';
 
   if (verbose) {
-    print('Fetching prices for ${markets.length} market(s): ${markets.map((m) => m.name).join(', ')}');
-    print('RPC: $rpcUrl');
+    LogService.log('Fetching prices for ${markets.length} market(s): ${markets.map((m) => m.name).join(', ')}');
+    LogService.log('RPC: $rpcUrl');
   }
 
   final uri = Uri.parse(rpcUrl);
@@ -89,16 +90,16 @@ void main(List<String> args) async {
 
       if (verbose) {
         final decimals = market.baseDecimals > 6 ? 8 : 6;
-        print('');
-        print('${market.name}:');
-        print('  Floor price: ${floorPrice.toStringAsFixed(decimals)} ${market.baseName}');
+        LogService.log('');
+        LogService.log('${market.name}:');
+        LogService.log('  Floor price: ${floorPrice.toStringAsFixed(decimals)} ${market.baseName}');
         if (priceResult.hasPrice) {
-          print('  Market price: ${priceResult.price!.toStringAsFixed(decimals)} ${market.baseName}');
-          print('  Transaction: ${priceResult.signature}');
+          LogService.log('  Market price: ${priceResult.price!.toStringAsFixed(decimals)} ${market.baseName}');
+          LogService.log('  Transaction: ${priceResult.signature}');
         } else if (priceResult.hasError) {
-          print('  Market price error: ${priceResult.errorMessage}');
+          LogService.log('  Market price error: ${priceResult.errorMessage}');
         } else {
-          print('  Market price status: ${priceResult.status}');
+          LogService.log('  Market price status: ${priceResult.status}');
         }
       }
 
@@ -122,13 +123,13 @@ void main(List<String> args) async {
       resultList.add(entry);
     }
 
-    print(jsonEncode({'markets': resultList}));
+    LogService.log(jsonEncode({'markets': resultList}));
   } catch (e) {
     if (verbose) {
-      print('\nFailed to fetch prices!');
-      print('  Error: $e');
+      LogService.log('\nFailed to fetch prices!');
+      LogService.log('  Error: $e');
     }
-    print(jsonEncode({'success': false, 'error': e.toString()}));
+    LogService.log(jsonEncode({'success': false, 'error': e.toString()}));
     exit(1);
   }
 

@@ -1,3 +1,4 @@
+import 'package:nirvana_solana/src/utils/log_service.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -32,51 +33,51 @@ void main(List<String> args) async {
   };
 
   for (final entry in accounts.entries) {
-    print('=== ${entry.key}: ${entry.value} ===');
+    LogService.log('=== ${entry.key}: ${entry.value} ===');
 
     final accountInfo = await rpcClient.getAccountInfo(entry.value);
     if (accountInfo.isEmpty || accountInfo['data'] == null) {
-      print('  Account not found\n');
+      LogService.log('  Account not found\n');
       continue;
     }
 
     final base64Data = accountInfo['data']?[0] as String?;
     if (base64Data == null || base64Data.isEmpty) {
-      print('  No data\n');
+      LogService.log('  No data\n');
       continue;
     }
 
     final bytes = Uint8List.fromList(base64.decode(base64Data));
     final bd = bytes.buffer.asByteData(bytes.offsetInBytes);
-    print('  Owner: ${accountInfo['owner']}');
-    print('  Length: ${bytes.length} bytes');
-    print('');
+    LogService.log('  Owner: ${accountInfo['owner']}');
+    LogService.log('  Length: ${bytes.length} bytes');
+    LogService.log('');
 
     // Full hex dump
-    print('  Full hex dump:');
+    LogService.log('  Full hex dump:');
     for (var i = 0; i < bytes.length; i += 16) {
       final end = (i + 16).clamp(0, bytes.length);
       final hex = bytes.sublist(i, end).map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ');
       final ascii = bytes.sublist(i, end).map((b) => (b >= 32 && b < 127) ? String.fromCharCode(b) : '.').join('');
-      print('  ${i.toRadixString(16).padLeft(4, '0')}: ${hex.padRight(47)} $ascii');
+      LogService.log('  ${i.toRadixString(16).padLeft(4, '0')}: ${hex.padRight(47)} $ascii');
     }
-    print('');
+    LogService.log('');
 
     // Scan every byte offset for u64 values that could be 0.048 SOL
     // 0.048 SOL = 48,000,000 lamports (9 decimals)
     // Range: 0.03 - 0.08 SOL = 30M - 80M lamports
-    print('  u64 LE scan (0.03-0.08 SOL range, 9 dec):');
+    LogService.log('  u64 LE scan (0.03-0.08 SOL range, 9 dec):');
     for (var offset = 0; offset + 8 <= bytes.length; offset++) {
       final val = bd.getUint64(offset, Endian.little);
       if (val >= 30000000 && val <= 80000000) {
         final solValue = val / 1e9;
-        print('    offset $offset (0x${offset.toRadixString(16)}): $val = ${solValue.toStringAsFixed(6)} SOL');
+        LogService.log('    offset $offset (0x${offset.toRadixString(16)}): $val = ${solValue.toStringAsFixed(6)} SOL');
       }
     }
-    print('');
+    LogService.log('');
 
     // Scan for Nirvana-style Rust Decimal (scale 10-28)
-    print('  Rust Decimal scan (Nirvana-style, scale 10-28, range 0.03-0.10):');
+    LogService.log('  Rust Decimal scan (Nirvana-style, scale 10-28, range 0.03-0.10):');
     for (var offset = 0; offset + 16 <= bytes.length; offset++) {
       final scale = bytes[offset + 2];
       if (scale < 10 || scale > 28) continue;
@@ -90,23 +91,23 @@ void main(List<String> args) async {
       final divisor = BigInt.from(10).pow(scale);
       final val = rawValue.toDouble() / divisor.toDouble();
       if (val >= 0.03 && val <= 0.10) {
-        print('    offset $offset (0x${offset.toRadixString(16)}): scale=$scale val=${val.toStringAsFixed(9)}');
+        LogService.log('    offset $offset (0x${offset.toRadixString(16)}): scale=$scale val=${val.toStringAsFixed(9)}');
       }
     }
-    print('');
+    LogService.log('');
 
     // Scan for f64 values
-    print('  f64 LE scan (range 0.03-0.10):');
+    LogService.log('  f64 LE scan (range 0.03-0.10):');
     for (var offset = 0; offset + 8 <= bytes.length; offset++) {
       final val = bd.getFloat64(offset, Endian.little);
       if (val >= 0.03 && val <= 0.10 && val.isFinite) {
-        print('    offset $offset (0x${offset.toRadixString(16)}): ${val.toStringAsFixed(9)}');
+        LogService.log('    offset $offset (0x${offset.toRadixString(16)}): ${val.toStringAsFixed(9)}');
       }
     }
-    print('');
+    LogService.log('');
 
     // Scan for wider Rust Decimal (any scale 1-28)
-    print('  Rust Decimal scan (wide scale 1-28, range 0.03-0.10):');
+    LogService.log('  Rust Decimal scan (wide scale 1-28, range 0.03-0.10):');
     for (var offset = 0; offset + 16 <= bytes.length; offset++) {
       final scale = bytes[offset + 2];
       if (scale < 1 || scale > 28) continue;
@@ -120,10 +121,10 @@ void main(List<String> args) async {
       final divisor = BigInt.from(10).pow(scale);
       final val = rawValue.toDouble() / divisor.toDouble();
       if (val >= 0.03 && val <= 0.10) {
-        print('    offset $offset (0x${offset.toRadixString(16)}): scale=$scale val=${val.toStringAsFixed(9)}');
+        LogService.log('    offset $offset (0x${offset.toRadixString(16)}): scale=$scale val=${val.toStringAsFixed(9)}');
       }
     }
-    print('');
+    LogService.log('');
   }
 
   exit(0);

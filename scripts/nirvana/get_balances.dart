@@ -15,14 +15,14 @@ import 'package:nirvana_solana/nirvana_solana.dart';
 
 void main(List<String> args) async {
   if (args.isEmpty) {
-    print('Usage: dart scripts/get_balances.dart <pubkey> [--rpc <url>] [--verbose]');
-    print('');
-    print('Options:');
-    print('  --rpc <url>  Custom RPC endpoint');
-    print('  --verbose    Show detailed output before JSON result');
-    print('');
-    print('Environment:');
-    print('  SOLANA_RPC_URL  RPC endpoint (overridden by --rpc)');
+    LogService.log('Usage: dart scripts/get_balances.dart <pubkey> [--rpc <url>] [--verbose]');
+    LogService.log('');
+    LogService.log('Options:');
+    LogService.log('  --rpc <url>  Custom RPC endpoint');
+    LogService.log('  --verbose    Show detailed output before JSON result');
+    LogService.log('');
+    LogService.log('Environment:');
+    LogService.log('  SOLANA_RPC_URL  RPC endpoint (overridden by --rpc)');
     exit(1);
   }
 
@@ -37,9 +37,9 @@ void main(List<String> args) async {
   }
 
   if (verbose) {
-    print('Wallet: $pubkey');
-    print('RPC: $rpcUrl');
-    print('\nFetching balances...');
+    LogService.log('Wallet: $pubkey');
+    LogService.log('RPC: $rpcUrl');
+    LogService.log('\nFetching balances...');
   }
 
   final client = NirvanaClient.fromRpcUrl(rpcUrl);
@@ -53,6 +53,9 @@ void main(List<String> args) async {
   // Get claimable prANA (calculated from counters)
   final claimablePrana = await client.getClaimablePrana(pubkey);
 
+  // Get floor price for borrow limit calculation
+  final floorPrice = await client.fetchFloorPrice();
+
   // Get claimable revenue share
   // First check if already staged (fast), if 0 then simulate to get preview
   var claimableRevshare = await client.getClaimableRevshare(pubkey);
@@ -60,6 +63,11 @@ void main(List<String> args) async {
     // Nothing staged - use simulation to preview what would be claimable
     claimableRevshare = await client.getClaimableRevshareViaSimulation(pubkey);
   }
+
+  final stakedAna = personalInfo?.stakedAna ?? 0.0;
+  final debt = personalInfo?.anaDebt ?? 0.0;
+  final borrowLimit = stakedAna * floorPrice;
+  final borrowable = borrowLimit > debt ? borrowLimit - debt : 0.0;
 
   final result = {
     'wallet': {
@@ -69,11 +77,16 @@ void main(List<String> args) async {
       'prANA': walletBalances['prANA'] ?? 0.0,
     },
     'staked': {
-      'ANA': personalInfo?.stakedAna ?? 0.0,
+      'ANA': stakedAna,
       'prANA': personalInfo?.stakedPrana ?? 0.0,
     },
     'debt': {
-      'NIRV': personalInfo?.anaDebt ?? 0.0,
+      'NIRV': debt,
+    },
+    'borrowable': {
+      'NIRV': borrowable,
+      'floorPrice': floorPrice,
+      'borrowLimit': borrowLimit,
     },
     'claimable': {
       'prANA': claimablePrana,
@@ -83,27 +96,32 @@ void main(List<String> args) async {
   };
 
   if (verbose) {
-    print('\n=== Wallet Balances ===');
-    print('  ANA:   ${walletBalances['ANA']?.toStringAsFixed(6) ?? '0'}');
-    print('  NIRV:  ${walletBalances['NIRV']?.toStringAsFixed(6) ?? '0'}');
-    print('  USDC:  ${walletBalances['USDC']?.toStringAsFixed(6) ?? '0'}');
-    print('  prANA: ${walletBalances['prANA']?.toStringAsFixed(6) ?? '0'}');
+    LogService.log('\n=== Wallet Balances ===');
+    LogService.log('  ANA:   ${walletBalances['ANA']?.toStringAsFixed(6) ?? '0'}');
+    LogService.log('  NIRV:  ${walletBalances['NIRV']?.toStringAsFixed(6) ?? '0'}');
+    LogService.log('  USDC:  ${walletBalances['USDC']?.toStringAsFixed(6) ?? '0'}');
+    LogService.log('  prANA: ${walletBalances['prANA']?.toStringAsFixed(6) ?? '0'}');
 
     if (personalInfo != null) {
-      print('\n=== Staking Position ===');
-      print('  Staked ANA:   ${personalInfo.stakedAna.toStringAsFixed(6)}');
-      print('  Staked prANA: ${personalInfo.stakedPrana.toStringAsFixed(6)}');
-      print('  NIRV Debt:    ${personalInfo.anaDebt.toStringAsFixed(6)}');
-      print('  Claimable prANA: ${claimablePrana.toStringAsFixed(6)}');
-      print('\n=== Claimable Revenue Share ===');
-      print('  ANA:  ${(claimableRevshare['ANA'] ?? 0.0).toStringAsFixed(6)}');
-      print('  NIRV: ${(claimableRevshare['NIRV'] ?? 0.0).toStringAsFixed(6)}');
+      LogService.log('\n=== Staking Position ===');
+      LogService.log('  Staked ANA:   ${personalInfo.stakedAna.toStringAsFixed(6)}');
+      LogService.log('  Staked prANA: ${personalInfo.stakedPrana.toStringAsFixed(6)}');
+      LogService.log('  NIRV Debt:    ${personalInfo.anaDebt.toStringAsFixed(6)}');
+      LogService.log('\n=== Borrow Capacity ===');
+      LogService.log('  Floor Price:  \$${floorPrice.toStringAsFixed(6)}');
+      LogService.log('  Borrow Limit: ${borrowLimit.toStringAsFixed(6)} NIRV');
+      LogService.log('  Borrowable:   ${borrowable.toStringAsFixed(6)} NIRV');
+      LogService.log('\n=== Claimable ===');
+      LogService.log('  prANA: ${claimablePrana.toStringAsFixed(6)}');
+      LogService.log('\n=== Claimable Revenue Share ===');
+      LogService.log('  ANA:  ${(claimableRevshare['ANA'] ?? 0.0).toStringAsFixed(6)}');
+      LogService.log('  NIRV: ${(claimableRevshare['NIRV'] ?? 0.0).toStringAsFixed(6)}');
     } else {
-      print('\n=== Staking Position ===');
-      print('  No staking position found');
+      LogService.log('\n=== Staking Position ===');
+      LogService.log('  No staking position found');
     }
-    print('');
+    LogService.log('');
   }
 
-  print(jsonEncode(result));
+  LogService.log(jsonEncode(result));
 }

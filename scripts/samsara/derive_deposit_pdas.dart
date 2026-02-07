@@ -1,3 +1,4 @@
+import 'package:nirvana_solana/src/utils/log_service.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -35,9 +36,9 @@ void main() async {
   // ================================================================
   // ACCOUNT 3: User stake/deposit record
   // ================================================================
-  print('=' * 70);
-  print('ACCOUNT 3 (target: $targetAccount3)');
-  print('=' * 70);
+  LogService.log('=' * 70);
+  LogService.log('ACCOUNT 3 (target: $targetAccount3)');
+  LogService.log('=' * 70);
 
   final account3Seeds = <String, List<Uint8List>>{
     '[samsaraMarket, user]': [
@@ -161,20 +162,20 @@ void main() async {
       final derived = result.toBase58();
       final match = derived == targetAccount3;
       final marker = match ? ' *** MATCH ***' : '';
-      print('  ${entry.key} => $derived$marker');
+      LogService.log('  ${entry.key} => $derived$marker');
       if (match) {
         foundAccount3Derivation = entry.key;
         foundAccount3Key = result;
       }
     } catch (e) {
-      print('  ${entry.key} => ERROR: $e');
+      LogService.log('  ${entry.key} => ERROR: $e');
     }
   }
 
   if (foundAccount3Key != null) {
-    print('\n>>> FOUND Account 3 derivation: $foundAccount3Derivation');
+    LogService.log('\n>>> FOUND Account 3 derivation: $foundAccount3Derivation');
   } else {
-    print('\n>>> Account 3 derivation NOT FOUND with any combination.');
+    LogService.log('\n>>> Account 3 derivation NOT FOUND with any combination.');
     // Use the known key for Account 6 derivation attempts
     foundAccount3Key =
         Ed25519HDPublicKey.fromBase58(targetAccount3);
@@ -183,9 +184,9 @@ void main() async {
   // ================================================================
   // ACCOUNT 6: prANA escrow token account
   // ================================================================
-  print('\n${'=' * 70}');
-  print('ACCOUNT 6 (target: $targetAccount6)');
-  print('=' * 70);
+  LogService.log('\n${'=' * 70}');
+  LogService.log('ACCOUNT 6 (target: $targetAccount6)');
+  LogService.log('=' * 70);
 
   final account6Seeds = <String, _PdaAttempt>{
     // Standard ATA: [owner, tokenProgram, mint] with ATA program
@@ -279,18 +280,18 @@ void main() async {
       final derived = result.toBase58();
       final match = derived == targetAccount6;
       final marker = match ? ' *** MATCH ***' : '';
-      print('  ${entry.key} => $derived$marker');
+      LogService.log('  ${entry.key} => $derived$marker');
     } catch (e) {
-      print('  ${entry.key} => ERROR: $e');
+      LogService.log('  ${entry.key} => ERROR: $e');
     }
   }
 
   // ================================================================
   // ACCOUNT 8: 17-byte account
   // ================================================================
-  print('\n${'=' * 70}');
-  print('ACCOUNT 8 (target: $targetAccount8)');
-  print('=' * 70);
+  LogService.log('\n${'=' * 70}');
+  LogService.log('ACCOUNT 8 (target: $targetAccount8)');
+  LogService.log('=' * 70);
 
   final account8Seeds = <String, List<Uint8List>>{
     '["epoch", samsaraMarket]': [
@@ -370,18 +371,18 @@ void main() async {
       final derived = result.toBase58();
       final match = derived == targetAccount8;
       final marker = match ? ' *** MATCH ***' : '';
-      print('  ${entry.key} => $derived$marker');
+      LogService.log('  ${entry.key} => $derived$marker');
     } catch (e) {
-      print('  ${entry.key} => ERROR: $e');
+      LogService.log('  ${entry.key} => ERROR: $e');
     }
   }
 
   // ================================================================
   // Query getProgramAccounts with dataSize=17
   // ================================================================
-  print('\n${'=' * 70}');
-  print('getProgramAccounts(Samsara, dataSize=17)');
-  print('=' * 70);
+  LogService.log('\n${'=' * 70}');
+  LogService.log('getProgramAccounts(Samsara, dataSize=17)');
+  LogService.log('=' * 70);
 
   final rpcUrl = Platform.environment['SOLANA_RPC_URL'] ??
       'https://api.mainnet-beta.solana.com';
@@ -395,27 +396,27 @@ void main() async {
   final rpcClient = DefaultSolanaRpcClient(solanaClient, rpcUrl: uri);
 
   try {
-    print('  Querying accounts with dataSize=17 owned by Samsara program...');
+    LogService.log('  Querying accounts with dataSize=17 owned by Samsara program...');
     final accounts = await rpcClient.getProgramAccounts(
       'SAMmdq34d9RJoqoqfnGhMRUvZumQriaT55eGzXeAQj7',
       dataSize: 17,
     );
-    print('  Found ${accounts.length} accounts with dataSize=17');
+    LogService.log('  Found ${accounts.length} accounts with dataSize=17');
     for (final acct in accounts) {
       final pubkey = acct['pubkey'] ?? 'unknown';
       final data = acct['account']?['data'];
       final dataStr = data is List ? data[0] : data?.toString() ?? '';
       final isTarget = pubkey == targetAccount8 ? ' *** TARGET ***' : '';
-      print('    $pubkey$isTarget');
+      LogService.log('    $pubkey$isTarget');
       if (dataStr.isNotEmpty) {
-        print('      data: $dataStr');
+        LogService.log('      data: $dataStr');
       }
     }
   } catch (e) {
-    print('  ERROR querying getProgramAccounts: $e');
+    LogService.log('  ERROR querying getProgramAccounts: $e');
   }
 
-  print('\nDone.');
+  LogService.log('\nDone.');
 }
 
 class _PdaAttempt {

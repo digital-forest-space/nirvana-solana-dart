@@ -1,3 +1,4 @@
+import 'package:nirvana_solana/src/utils/log_service.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:solana/solana.dart';
@@ -27,15 +28,15 @@ void main() async {
   // Bytes 72-103: user_shares pubkey
   // Total observed size: 121 bytes
 
-  print('Querying Mayflower program accounts to find user positions...\n');
+  LogService.log('Querying Mayflower program accounts to find user positions...\n');
 
   for (final entry in testUsers.entries) {
     final userName = entry.key;
     final userPubkey = entry.value;
     final expectedPosition = knownPositions[userPubkey];
 
-    print('=== $userName: $userPubkey ===');
-    print('Expected position: $expectedPosition');
+    LogService.log('=== $userName: $userPubkey ===');
+    LogService.log('Expected position: $expectedPosition');
 
     try {
       // Query with memcmp filter at offset 40 (where user pubkey is stored)
@@ -67,19 +68,19 @@ void main() async {
       final result = jsonDecode(response.body);
 
       if (result['error'] != null) {
-        print('  RPC Error: ${result['error']}');
+        LogService.log('  RPC Error: ${result['error']}');
         continue;
       }
 
       final accounts = result['result'] as List;
-      print('  Found ${accounts.length} account(s)');
+      LogService.log('  Found ${accounts.length} account(s)');
 
       for (final account in accounts) {
         final pubkey = account['pubkey'];
-        print('  Account: $pubkey');
+        LogService.log('  Account: $pubkey');
 
         if (pubkey == expectedPosition) {
-          print('  ✅ MATCH! Found the expected personal_position');
+          LogService.log('  ✅ MATCH! Found the expected personal_position');
         }
 
         // Decode the data to extract user_shares
@@ -89,14 +90,14 @@ void main() async {
         if (data.length >= 104) {
           final userSharesBytes = data.sublist(72, 104);
           final userShares = Ed25519HDPublicKey(userSharesBytes).toBase58();
-          print('  User shares: $userShares');
+          LogService.log('  User shares: $userShares');
         }
       }
     } catch (e) {
-      print('  Error: $e');
+      LogService.log('  Error: $e');
     }
-    print('');
+    LogService.log('');
   }
 
-  print('Done!');
+  LogService.log('Done!');
 }

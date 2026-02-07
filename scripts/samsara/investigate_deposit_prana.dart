@@ -1,3 +1,4 @@
+import 'package:nirvana_solana/src/utils/log_service.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -44,65 +45,65 @@ void main() async {
   // ================================================================
   // 1. Account 3: Gvj2W5XvB611ZJqZvAWdTUcD2uB2UkfFqgv3R4ico6gw
   // ================================================================
-  print('=' * 70);
-  print('ACCOUNT 3: $account3');
-  print('=' * 70);
+  LogService.log('=' * 70);
+  LogService.log('ACCOUNT 3: $account3');
+  LogService.log('=' * 70);
   await _inspectAccount(rpcClient, account3);
 
   // ================================================================
   // 2. Account 6: A2mQkk1zdUx1uMn2BXiKQ57vQVPB3Soi9dtCwVHkdotM
   // ================================================================
-  print('\n${'=' * 70}');
-  print('ACCOUNT 6: $account6');
-  print('=' * 70);
+  LogService.log('\n${'=' * 70}');
+  LogService.log('ACCOUNT 6: $account6');
+  LogService.log('=' * 70);
   await _inspectAccount(rpcClient, account6);
 
   // ================================================================
   // 3. Account 8: G5GdMpizMafXkcPrLzmf1H7bQR3CMyxoMsHYmXKFaAdA
   // ================================================================
-  print('\n${'=' * 70}');
-  print('ACCOUNT 8: $account8');
-  print('=' * 70);
+  LogService.log('\n${'=' * 70}');
+  LogService.log('ACCOUNT 8: $account8');
+  LogService.log('=' * 70);
   await _inspectAccount(rpcClient, account8);
 
   // Also try to read discriminator and user pubkey from account 8
-  print('\n  --- User Position Deep Inspection (Account 8) ---');
+  LogService.log('\n  --- User Position Deep Inspection (Account 8) ---');
   await _inspectPositionAccount(rpcClient, account8, expectedUserPubkey);
 
   // ================================================================
   // 4. ATA derivation check
   // ================================================================
-  print('\n${'=' * 70}');
-  print('ATA DERIVATION CHECK');
-  print('=' * 70);
-  print('  Owner:    $account3');
-  print('  Mint:     $pranaMint (prANA)');
-  print('  Expected: $account6');
+  LogService.log('\n${'=' * 70}');
+  LogService.log('ATA DERIVATION CHECK');
+  LogService.log('=' * 70);
+  LogService.log('  Owner:    $account3');
+  LogService.log('  Mint:     $pranaMint (prANA)');
+  LogService.log('  Expected: $account6');
 
   try {
     final derivedAta = await _deriveAta(account3, pranaMint);
-    print('  Derived:  $derivedAta');
+    LogService.log('  Derived:  $derivedAta');
     if (derivedAta == account6) {
-      print('  RESULT:   MATCH - Account 6 IS the ATA of Account 3 for prANA');
+      LogService.log('  RESULT:   MATCH - Account 6 IS the ATA of Account 3 for prANA');
     } else {
-      print('  RESULT:   NO MATCH - Account 6 is NOT the ATA of Account 3 for prANA');
+      LogService.log('  RESULT:   NO MATCH - Account 6 is NOT the ATA of Account 3 for prANA');
     }
   } catch (e) {
-    print('  ERROR deriving ATA: $e');
+    LogService.log('  ERROR deriving ATA: $e');
   }
 
   // ================================================================
   // 5. Samsara Tenant verification
   // ================================================================
-  print('\n${'=' * 70}');
-  print('SAMSARA TENANT VERIFICATION');
-  print('=' * 70);
-  print('  From transaction: $samsaraTenantFromTx');
-  print('  From config:      ${config.samsaraTenant}');
+  LogService.log('\n${'=' * 70}');
+  LogService.log('SAMSARA TENANT VERIFICATION');
+  LogService.log('=' * 70);
+  LogService.log('  From transaction: $samsaraTenantFromTx');
+  LogService.log('  From config:      ${config.samsaraTenant}');
   if (samsaraTenantFromTx == config.samsaraTenant) {
-    print('  RESULT:           MATCH - Tenant matches config');
+    LogService.log('  RESULT:           MATCH - Tenant matches config');
   } else {
-    print('  RESULT:           MISMATCH - Tenant does NOT match config');
+    LogService.log('  RESULT:           MISMATCH - Tenant does NOT match config');
   }
 
   exit(0);
@@ -113,7 +114,7 @@ Future<void> _inspectAccount(SolanaRpcClient rpcClient, String address) async {
   try {
     final info = await rpcClient.getAccountInfo(address);
     if (info.isEmpty) {
-      print('  Account not found (empty response)');
+      LogService.log('  Account not found (empty response)');
       return;
     }
 
@@ -121,16 +122,16 @@ Future<void> _inspectAccount(SolanaRpcClient rpcClient, String address) async {
     final lamports = info['lamports'];
     final executable = info['executable'];
 
-    print('  Owner program: $owner');
-    print('  Lamports:      $lamports');
-    print('  Executable:    $executable');
+    LogService.log('  Owner program: $owner');
+    LogService.log('  Lamports:      $lamports');
+    LogService.log('  Executable:    $executable');
 
     // Decode data
     final dataArray = info['data'] as List?;
     if (dataArray != null && dataArray.isNotEmpty) {
       final base64Data = dataArray[0] as String;
       final data = base64Decode(base64Data);
-      print('  Data length:   ${data.length} bytes');
+      LogService.log('  Data length:   ${data.length} bytes');
 
       // If token program owns it, parse as token account
       if (owner == _tokenProgram && data.length >= 165) {
@@ -138,10 +139,10 @@ Future<void> _inspectAccount(SolanaRpcClient rpcClient, String address) async {
         final tokenOwner =
             _bytesToBase58(Uint8List.fromList(data.sublist(32, 64)));
         final amount = _readUint64LE(data, 64);
-        print('  --- Token Account ---');
-        print('  Mint:          $mint');
-        print('  Token Owner:   $tokenOwner');
-        print('  Amount (raw):  $amount');
+        LogService.log('  --- Token Account ---');
+        LogService.log('  Mint:          $mint');
+        LogService.log('  Token Owner:   $tokenOwner');
+        LogService.log('  Amount (raw):  $amount');
       } else {
         // Print first 40 bytes as hex for inspection
         final previewLen = data.length < 40 ? data.length : 40;
@@ -149,7 +150,7 @@ Future<void> _inspectAccount(SolanaRpcClient rpcClient, String address) async {
             .sublist(0, previewLen)
             .map((b) => b.toRadixString(16).padLeft(2, '0'))
             .join(' ');
-        print('  First $previewLen bytes (hex): $hex');
+        LogService.log('  First $previewLen bytes (hex): $hex');
 
         // Try to read first 8 bytes as discriminator
         if (data.length >= 8) {
@@ -157,21 +158,21 @@ Future<void> _inspectAccount(SolanaRpcClient rpcClient, String address) async {
               .sublist(0, 8)
               .map((b) => b.toRadixString(16).padLeft(2, '0'))
               .join(' ');
-          print('  Discriminator: $disc');
+          LogService.log('  Discriminator: $disc');
         }
 
         // Try to read bytes 8-40 as a pubkey
         if (data.length >= 40) {
           final pubkey =
               _bytesToBase58(Uint8List.fromList(data.sublist(8, 40)));
-          print('  Bytes 8-40 as pubkey: $pubkey');
+          LogService.log('  Bytes 8-40 as pubkey: $pubkey');
         }
       }
     } else {
-      print('  Data:          (no data)');
+      LogService.log('  Data:          (no data)');
     }
   } catch (e) {
-    print('  ERROR fetching account: $e');
+    LogService.log('  ERROR fetching account: $e');
   }
 }
 
@@ -184,13 +185,13 @@ Future<void> _inspectPositionAccount(
   try {
     final info = await rpcClient.getAccountInfo(address);
     if (info.isEmpty) {
-      print('  Account not found');
+      LogService.log('  Account not found');
       return;
     }
 
     final dataArray = info['data'] as List?;
     if (dataArray == null || dataArray.isEmpty) {
-      print('  No data');
+      LogService.log('  No data');
       return;
     }
 
@@ -198,7 +199,7 @@ Future<void> _inspectPositionAccount(
     final data = base64Decode(base64Data);
 
     if (data.length < 40) {
-      print('  Data too short (${data.length} bytes) for position account');
+      LogService.log('  Data too short (${data.length} bytes) for position account');
       return;
     }
 
@@ -206,48 +207,48 @@ Future<void> _inspectPositionAccount(
     final discHex = discriminator
         .map((b) => b.toRadixString(16).padLeft(2, '0'))
         .join(' ');
-    print('  Discriminator (8 bytes): $discHex');
+    LogService.log('  Discriminator (8 bytes): $discHex');
 
     final userPubkey =
         _bytesToBase58(Uint8List.fromList(data.sublist(8, 40)));
-    print('  User pubkey (bytes 8-40): $userPubkey');
+    LogService.log('  User pubkey (bytes 8-40): $userPubkey');
 
     if (userPubkey == expectedUserPubkey) {
-      print('  RESULT: MATCH - User pubkey matches expected ($expectedUserPubkey)');
+      LogService.log('  RESULT: MATCH - User pubkey matches expected ($expectedUserPubkey)');
     } else {
-      print('  RESULT: NO MATCH - expected $expectedUserPubkey');
+      LogService.log('  RESULT: NO MATCH - expected $expectedUserPubkey');
     }
 
     // Print additional fields if present
     if (data.length >= 72) {
       final field2 =
           _bytesToBase58(Uint8List.fromList(data.sublist(40, 72)));
-      print('  Bytes 40-72 as pubkey: $field2');
+      LogService.log('  Bytes 40-72 as pubkey: $field2');
     }
     if (data.length >= 104) {
       final field3 =
           _bytesToBase58(Uint8List.fromList(data.sublist(72, 104)));
-      print('  Bytes 72-104 as pubkey: $field3');
+      LogService.log('  Bytes 72-104 as pubkey: $field3');
     }
 
     // Print remaining data as u64 values
     const structEnd = 104; // After 3 pubkeys + discriminator
     if (data.length > structEnd) {
-      print('  Remaining ${data.length - structEnd} bytes after 3 pubkey fields:');
+      LogService.log('  Remaining ${data.length - structEnd} bytes after 3 pubkey fields:');
       final remaining = data.sublist(structEnd);
       final remHex = remaining
           .map((b) => b.toRadixString(16).padLeft(2, '0'))
           .join(' ');
-      print('    Hex: $remHex');
+      LogService.log('    Hex: $remHex');
 
       // Interpret as u64 values
       for (int i = 0; i + 8 <= remaining.length; i += 8) {
         final val = _readUint64LE(remaining, i);
-        print('    Offset ${structEnd + i}: $val');
+        LogService.log('    Offset ${structEnd + i}: $val');
       }
     }
   } catch (e) {
-    print('  ERROR: $e');
+    LogService.log('  ERROR: $e');
   }
 }
 

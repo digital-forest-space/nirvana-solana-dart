@@ -16,14 +16,14 @@ import 'package:solana/solana.dart';
 
 void main(List<String> args) async {
   if (args.length < 2) {
-    print('Usage: dart scripts/unstake_ana.dart <keypair_path> <ana_amount> [--rpc <url>] [--verbose]');
-    print('');
-    print('Options:');
-    print('  --rpc <url>  Custom RPC endpoint');
-    print('  --verbose    Show detailed output before JSON result');
-    print('');
-    print('Environment:');
-    print('  SOLANA_RPC_URL  RPC endpoint (overridden by --rpc)');
+    LogService.log('Usage: dart scripts/unstake_ana.dart <keypair_path> <ana_amount> [--rpc <url>] [--verbose]');
+    LogService.log('');
+    LogService.log('Options:');
+    LogService.log('  --rpc <url>  Custom RPC endpoint');
+    LogService.log('  --verbose    Show detailed output before JSON result');
+    LogService.log('');
+    LogService.log('Environment:');
+    LogService.log('  SOLANA_RPC_URL  RPC endpoint (overridden by --rpc)');
     exit(1);
   }
 
@@ -41,38 +41,38 @@ void main(List<String> args) async {
   }
 
   if (anaAmount == null || anaAmount <= 0) {
-    print(jsonEncode({'success': false, 'error': 'Invalid amount: ${args[1]}'}));
+    LogService.log(jsonEncode({'success': false, 'error': 'Invalid amount: ${args[1]}'}));
     exit(1);
   }
 
   // Load keypair
   final keypairFile = File(keypairPath);
   if (!keypairFile.existsSync()) {
-    print(jsonEncode({'success': false, 'error': 'Keypair file not found: $keypairPath'}));
+    LogService.log(jsonEncode({'success': false, 'error': 'Keypair file not found: $keypairPath'}));
     exit(1);
   }
 
-  if (verbose) print('Loading keypair from $keypairPath...');
+  if (verbose) LogService.log('Loading keypair from $keypairPath...');
   final keypairJson = keypairFile.readAsStringSync();
   final keypairBytes = (RegExp(r'\d+').allMatches(keypairJson).map((m) => int.parse(m.group(0)!)).toList());
   final keypair = await Ed25519HDKeyPair.fromPrivateKeyBytes(
     privateKey: keypairBytes.sublist(0, 32),
   );
   final userPubkey = keypair.publicKey.toBase58();
-  if (verbose) print('Wallet: $userPubkey');
+  if (verbose) LogService.log('Wallet: $userPubkey');
 
   // Create client
-  if (verbose) print('RPC: $rpcUrl');
+  if (verbose) LogService.log('RPC: $rpcUrl');
   final client = NirvanaClient.fromRpcUrl(rpcUrl);
 
   // Show current prices
-  if (verbose) print('\nFetching current floor price...');
+  if (verbose) LogService.log('\nFetching current floor price...');
   final floorPrice = await client.fetchFloorPrice();
   if (verbose) {
-    print('  Floor price: \$${floorPrice.toStringAsFixed(6)}');
-    print('\nTransaction:');
-    print('  Unstaking: $anaAmount ANA');
-    print('\nExecuting unstake transaction...');
+    LogService.log('  Floor price: \$${floorPrice.toStringAsFixed(6)}');
+    LogService.log('\nTransaction:');
+    LogService.log('  Unstaking: $anaAmount ANA');
+    LogService.log('\nExecuting unstake transaction...');
   }
 
   // Execute unstake
@@ -84,27 +84,27 @@ void main(List<String> args) async {
 
   if (result.success) {
     if (verbose) {
-      print('\n✅ Unstake successful!');
-      print('  Signature: ${result.signature}');
-      print('  Explorer: https://solscan.io/tx/${result.signature}');
-      print('\nParsing transaction...');
+      LogService.log('\n✅ Unstake successful!');
+      LogService.log('  Signature: ${result.signature}');
+      LogService.log('  Explorer: https://solscan.io/tx/${result.signature}');
+      LogService.log('\nParsing transaction...');
     }
 
     // Parse the transaction
     try {
       final tx = await client.parseTransaction(result.signature);
       if (verbose) {
-        print('  Type: ${tx.type.name.toUpperCase()}');
+        LogService.log('  Type: ${tx.type.name.toUpperCase()}');
         for (final r in tx.received) {
-          print('  Unstaked: ${r.amount.toStringAsFixed(6)} ${r.currency}');
+          LogService.log('  Unstaked: ${r.amount.toStringAsFixed(6)} ${r.currency}');
         }
-        print('');
+        LogService.log('');
       }
 
       // Output JSON result
-      print(jsonEncode(tx.toJson()));
+      LogService.log(jsonEncode(tx.toJson()));
     } catch (e) {
-      print(jsonEncode({
+      LogService.log(jsonEncode({
         'success': true,
         'signature': result.signature,
         'parseError': e.toString(),
@@ -113,10 +113,10 @@ void main(List<String> args) async {
     }
   } else {
     if (verbose) {
-      print('\n❌ Unstake failed!');
-      print('  Error: ${result.error}');
+      LogService.log('\n❌ Unstake failed!');
+      LogService.log('  Error: ${result.error}');
     }
-    print(jsonEncode({'success': false, 'error': result.error}));
+    LogService.log(jsonEncode({'success': false, 'error': result.error}));
     exit(1);
   }
 }

@@ -1,3 +1,4 @@
+import 'package:nirvana_solana/src/utils/log_service.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
@@ -30,7 +31,7 @@ void main(List<String> args) async {
   var allMatch = true;
 
   // 1. Verify priceCurve PDA
-  if (verbose) print('Deriving priceCurve PDA...');
+  if (verbose) LogService.log('Deriving priceCurve PDA...');
   final derivedPriceCurve = await pda.priceCurve(tenant: tenantKey);
   final priceCurveMatch = derivedPriceCurve.toBase58() == config.priceCurve;
   if (!priceCurveMatch) allMatch = false;
@@ -41,13 +42,13 @@ void main(List<String> args) async {
     'match': priceCurveMatch,
   });
   if (verbose) {
-    print('  Derived:  ${derivedPriceCurve.toBase58()}');
-    print('  Expected: ${config.priceCurve}');
-    print('  Match:    $priceCurveMatch');
+    LogService.log('  Derived:  ${derivedPriceCurve.toBase58()}');
+    LogService.log('  Expected: ${config.priceCurve}');
+    LogService.log('  Match:    $priceCurveMatch');
   }
 
   // 2. Verify curveBallot PDA (no known address, just check it derives)
-  if (verbose) print('\nDeriving curveBallot PDA...');
+  if (verbose) LogService.log('\nDeriving curveBallot PDA...');
   final derivedCurveBallot = await pda.curveBallot(tenant: tenantKey);
   results.add({
     'name': 'curveBallot',
@@ -55,11 +56,11 @@ void main(List<String> args) async {
     'note': 'No known address to compare - checking on-chain existence',
   });
   if (verbose) {
-    print('  Derived: ${derivedCurveBallot.toBase58()}');
+    LogService.log('  Derived: ${derivedCurveBallot.toBase58()}');
   }
 
   // 3. Check on-chain existence of derived accounts
-  if (verbose) print('\nChecking on-chain existence of derived accounts...');
+  if (verbose) LogService.log('\nChecking on-chain existence of derived accounts...');
   final accountsToCheck = {
     'priceCurve': derivedPriceCurve.toBase58(),
     'curveBallot': derivedCurveBallot.toBase58(),
@@ -69,21 +70,21 @@ void main(List<String> args) async {
     final info = await _getAccountInfo(rpcUrl, entry.value);
     final exists = info != null;
     if (verbose) {
-      print('  ${entry.key} (${entry.value}): ${exists ? "EXISTS" : "NOT FOUND"}');
+      LogService.log('  ${entry.key} (${entry.value}): ${exists ? "EXISTS" : "NOT FOUND"}');
       if (exists) {
         final owner = info['owner'];
         final dataLen = (info['data'] as List?)?.isNotEmpty == true
             ? (info['data'][0] as String).length
             : 0;
-        print('    Owner: $owner');
-        print('    Data length: ~${dataLen ~/ 2} bytes (base64)');
+        LogService.log('    Owner: $owner');
+        LogService.log('    Data length: ~${dataLen ~/ 2} bytes (base64)');
       }
     }
   }
 
   // 4. Find a known user's personalAccount via getProgramAccounts
   // and verify it matches our NirvanaPda.personalAccount() derivation
-  if (verbose) print('\nSearching for a user personalAccount to verify derivation...');
+  if (verbose) LogService.log('\nSearching for a user personalAccount to verify derivation...');
   final programAccounts = await _getProgramAccounts(rpcUrl, config.programId, 272);
 
   if (programAccounts.isNotEmpty) {
@@ -101,11 +102,11 @@ void main(List<String> args) async {
       final onChainTenantKey = Ed25519HDPublicKey(onChainTenantBytes.toList());
 
       if (verbose) {
-        print('  Found account: $accountPubkey');
-        print('  Owner (offset 8):  $userPubkey');
-        print('  Tenant (offset 40): ${onChainTenantKey.toBase58()}');
+        LogService.log('  Found account: $accountPubkey');
+        LogService.log('  Owner (offset 8):  $userPubkey');
+        LogService.log('  Tenant (offset 40): ${onChainTenantKey.toBase58()}');
         if (onChainTenantKey.toBase58() != config.tenantAccount) {
-          print('  WARNING: on-chain tenant differs from config tenant (${config.tenantAccount})');
+          LogService.log('  WARNING: on-chain tenant differs from config tenant (${config.tenantAccount})');
         }
       }
 
@@ -125,25 +126,25 @@ void main(List<String> args) async {
         'match': personalMatch,
       });
       if (verbose) {
-        print('  Derived:  ${derivedPersonal.toBase58()}');
-        print('  Expected: $accountPubkey');
-        print('  Match:    $personalMatch');
+        LogService.log('  Derived:  ${derivedPersonal.toBase58()}');
+        LogService.log('  Expected: $accountPubkey');
+        LogService.log('  Match:    $personalMatch');
       }
     }
   } else {
-    if (verbose) print('  No personalAccount found via getProgramAccounts');
+    if (verbose) LogService.log('  No personalAccount found via getProgramAccounts');
   }
 
   // Summary
   if (verbose) {
-    print('\n=== Results ===');
+    LogService.log('\n=== Results ===');
     for (final r in results) {
       final match = r['match'];
       final status = match == null ? '?' : (match ? 'OK' : 'FAIL');
-      print('  [$status] ${r['name']}: ${r['derived']}');
+      LogService.log('  [$status] ${r['name']}: ${r['derived']}');
     }
-    print('');
-    print(allMatch ? 'All verifiable PDAs match.' : 'WARNING: Some PDAs do not match!');
+    LogService.log('');
+    LogService.log(allMatch ? 'All verifiable PDAs match.' : 'WARNING: Some PDAs do not match!');
   }
 
   final output = {
@@ -152,7 +153,7 @@ void main(List<String> args) async {
     'results': results,
   };
 
-  print(jsonEncode(output));
+  LogService.log(jsonEncode(output));
   exit(allMatch ? 0 : 1);
 }
 

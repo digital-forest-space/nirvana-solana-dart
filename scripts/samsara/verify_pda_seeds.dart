@@ -6,6 +6,7 @@
 ///   logCounter() => findProgramAddress(["log_counter"])
 ///
 /// All PDAs are derived against the Samsara program.
+import 'package:nirvana_solana/src/utils/log_service.dart';
 import 'dart:convert';
 import 'package:solana/solana.dart';
 
@@ -26,13 +27,13 @@ void main() async {
   const expectedPranaEscrow = 'A2mQkk1zdUx1uMn2BXiKQ57vQVPB3Soi9dtCwVHkdotM';
   const expectedLogCounter = 'G5GdMpizMafXkcPrLzmf1H7bQR3CMyxoMsHYmXKFaAdA';
 
-  print('========================================');
-  print('  Samsara PDA Seed Verification');
-  print('========================================\n');
-  print('Program:  SAMmdq34d9RJoqoqfnGhMRUvZumQriaT55eGzXeAQj7');
-  print('User:     YOUR_WALLET_ADDRESS_HERE');
-  print('Market:   4KnomWX4ga9qmDdQN9GctJKjEnwLQTNWWHs57MyYtmYc');
-  print('');
+  LogService.log('========================================');
+  LogService.log('  Samsara PDA Seed Verification');
+  LogService.log('========================================\n');
+  LogService.log('Program:  SAMmdq34d9RJoqoqfnGhMRUvZumQriaT55eGzXeAQj7');
+  LogService.log('User:     YOUR_WALLET_ADDRESS_HERE');
+  LogService.log('Market:   4KnomWX4ga9qmDdQN9GctJKjEnwLQTNWWHs57MyYtmYc');
+  LogService.log('');
 
   int passed = 0;
   int failed = 0;
@@ -40,8 +41,8 @@ void main() async {
   // -------------------------------------------------------
   // 1. personalGovAccount: ["personal_gov_account", market, owner]
   // -------------------------------------------------------
-  print('--- Test 1: personalGovAccount ---');
-  print('  Seeds: ["personal_gov_account", market.toBuffer(), owner.toBuffer()]');
+  LogService.log('--- Test 1: personalGovAccount ---');
+  LogService.log('  Seeds: ["personal_gov_account", market.toBuffer(), owner.toBuffer()]');
 
   final govAccount = await Ed25519HDPublicKey.findProgramAddress(
     seeds: [
@@ -53,24 +54,24 @@ void main() async {
   );
   final derivedGovAccount = govAccount.toBase58();
 
-  print('  Expected: $expectedGovAccount');
-  print('  Derived:  $derivedGovAccount');
+  LogService.log('  Expected: $expectedGovAccount');
+  LogService.log('  Derived:  $derivedGovAccount');
   if (derivedGovAccount == expectedGovAccount) {
-    print('  Result:   PASS');
+    LogService.log('  Result:   PASS');
     passed++;
   } else {
-    print('  Result:   FAIL');
+    LogService.log('  Result:   FAIL');
     failed++;
   }
-  print('');
+  LogService.log('');
 
   // -------------------------------------------------------
   // 2. personalGovPranaEscrow: ["prana_escrow", govAccount]
   //    Uses the govAccount derived in step 1
   // -------------------------------------------------------
-  print('--- Test 2: personalGovPranaEscrow ---');
-  print('  Seeds: ["prana_escrow", govAccount.toBuffer()]');
-  print('  (govAccount from step 1: $derivedGovAccount)');
+  LogService.log('--- Test 2: personalGovPranaEscrow ---');
+  LogService.log('  Seeds: ["prana_escrow", govAccount.toBuffer()]');
+  LogService.log('  (govAccount from step 1: $derivedGovAccount)');
 
   final pranaEscrow = await Ed25519HDPublicKey.findProgramAddress(
     seeds: [
@@ -81,22 +82,22 @@ void main() async {
   );
   final derivedPranaEscrow = pranaEscrow.toBase58();
 
-  print('  Expected: $expectedPranaEscrow');
-  print('  Derived:  $derivedPranaEscrow');
+  LogService.log('  Expected: $expectedPranaEscrow');
+  LogService.log('  Derived:  $derivedPranaEscrow');
   if (derivedPranaEscrow == expectedPranaEscrow) {
-    print('  Result:   PASS');
+    LogService.log('  Result:   PASS');
     passed++;
   } else {
-    print('  Result:   FAIL');
+    LogService.log('  Result:   FAIL');
     failed++;
   }
-  print('');
+  LogService.log('');
 
   // -------------------------------------------------------
   // 3. logCounter: ["log_counter"]
   // -------------------------------------------------------
-  print('--- Test 3: logCounter (samLogCounter) ---');
-  print('  Seeds: ["log_counter"]');
+  LogService.log('--- Test 3: logCounter (samLogCounter) ---');
+  LogService.log('  Seeds: ["log_counter"]');
 
   final logCounter = await Ed25519HDPublicKey.findProgramAddress(
     seeds: [
@@ -106,27 +107,27 @@ void main() async {
   );
   final derivedLogCounter = logCounter.toBase58();
 
-  print('  Expected: $expectedLogCounter');
-  print('  Derived:  $derivedLogCounter');
+  LogService.log('  Expected: $expectedLogCounter');
+  LogService.log('  Derived:  $derivedLogCounter');
   if (derivedLogCounter == expectedLogCounter) {
-    print('  Result:   PASS');
+    LogService.log('  Result:   PASS');
     passed++;
   } else {
-    print('  Result:   FAIL');
+    LogService.log('  Result:   FAIL');
     failed++;
   }
-  print('');
+  LogService.log('');
 
   // -------------------------------------------------------
   // Summary
   // -------------------------------------------------------
-  print('========================================');
-  print('  Summary: $passed passed, $failed failed (out of 3)');
-  print('========================================');
+  LogService.log('========================================');
+  LogService.log('  Summary: $passed passed, $failed failed (out of 3)');
+  LogService.log('========================================');
 
   if (failed > 0) {
-    print('\nSome PDA derivations did not match. Check seed ordering or encoding.');
+    LogService.log('\nSome PDA derivations did not match. Check seed ordering or encoding.');
   } else {
-    print('\nAll PDA seeds verified successfully!');
+    LogService.log('\nAll PDA seeds verified successfully!');
   }
 }

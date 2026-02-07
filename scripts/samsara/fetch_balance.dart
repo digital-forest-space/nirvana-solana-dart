@@ -1,3 +1,4 @@
+import 'package:nirvana_solana/src/utils/log_service.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'package:solana/solana.dart';
@@ -53,11 +54,11 @@ void main(List<String> args) async {
   }
 
   if (userPubkey == null) {
-    print('Usage: dart scripts/samsara/fetch_balance.dart <pubkey> [--market <name>] [--active] [--raw] [--rpc <url>] [--verbose]');
-    print('');
-    print('Available markets:');
+    LogService.log('Usage: dart scripts/samsara/fetch_balance.dart <pubkey> [--market <name>] [--active] [--raw] [--rpc <url>] [--verbose]');
+    LogService.log('');
+    LogService.log('Available markets:');
     for (final name in NavTokenMarket.availableMarkets) {
-      print('  $name');
+      LogService.log('  $name');
     }
     exit(0);
   }
@@ -67,7 +68,7 @@ void main(List<String> args) async {
   if (marketName != null) {
     final market = NavTokenMarket.byName(marketName);
     if (market == null) {
-      print(jsonEncode({'success': false, 'error': 'Unknown market: $marketName'}));
+      LogService.log(jsonEncode({'success': false, 'error': 'Unknown market: $marketName'}));
       exit(1);
     }
     markets = [market];
@@ -75,13 +76,13 @@ void main(List<String> args) async {
     markets = NavTokenMarket.all.values.toList();
   }
 
-  if (verbose) print('Wallet: $userPubkey');
+  if (verbose) LogService.log('Wallet: $userPubkey');
 
   // Create SamsaraClient
   rpcUrl ??= Platform.environment['SOLANA_RPC_URL'] ??
       'https://api.mainnet-beta.solana.com';
 
-  if (verbose) print('RPC: $rpcUrl');
+  if (verbose) LogService.log('RPC: $rpcUrl');
   final uri = Uri.parse(rpcUrl);
   final wsUrl = Uri.parse(rpcUrl.replaceFirst('https', 'wss'));
   final solanaClient = SolanaClient(
@@ -100,8 +101,8 @@ void main(List<String> args) async {
   final batchCount = (accountCount / batchSize).ceil();
 
   if (verbose) {
-    print('\nFetching balances for ${markets.length} market(s): ${markets.map((m) => m.name).join(', ')}');
-    print('  Accounts: $accountCount, batch size: $batchSize, batches: $batchCount, RPC calls: $batchCount');
+    LogService.log('\nFetching balances for ${markets.length} market(s): ${markets.map((m) => m.name).join(', ')}');
+    LogService.log('  Accounts: $accountCount, batch size: $batchSize, batches: $batchCount, RPC calls: $batchCount');
   }
 
   try {
@@ -131,13 +132,13 @@ void main(List<String> args) async {
       if (verbose) {
         final navDecimals = market.navDecimals > 6 ? 8 : 6;
         final baseDecimals = market.baseDecimals > 6 ? 8 : 6;
-        print('');
-        print('${market.name} (liquid): ${liquid.toStringAsFixed(navDecimals)}');
-        print('${market.name} (deposited): ${deposited.toStringAsFixed(navDecimals)}');
-        print('${market.baseName}: ${balances[market.baseName]!.toStringAsFixed(baseDecimals)}');
-        print('prANA deposited: ${pranaDeposited.toStringAsFixed(6)}');
-        print('Rewards unclaimed (${market.baseName}): ${rewards.toStringAsFixed(baseDecimals)}');
-        print('Debt (${market.baseName}): ${debt.toStringAsFixed(baseDecimals)}');
+        LogService.log('');
+        LogService.log('${market.name} (liquid): ${liquid.toStringAsFixed(navDecimals)}');
+        LogService.log('${market.name} (deposited): ${deposited.toStringAsFixed(navDecimals)}');
+        LogService.log('${market.baseName}: ${balances[market.baseName]!.toStringAsFixed(baseDecimals)}');
+        LogService.log('prANA deposited: ${pranaDeposited.toStringAsFixed(6)}');
+        LogService.log('Rewards unclaimed (${market.baseName}): ${rewards.toStringAsFixed(baseDecimals)}');
+        LogService.log('Debt (${market.baseName}): ${debt.toStringAsFixed(baseDecimals)}');
       }
 
       resultList.add({
@@ -172,7 +173,7 @@ void main(List<String> args) async {
       });
     }
 
-    print(jsonEncode({
+    LogService.log(jsonEncode({
       'wallet': userPubkey,
       'markets': resultList,
     }));
@@ -181,7 +182,7 @@ void main(List<String> args) async {
     // for offset discovery. Requires a separate fetch since the batched
     // response doesn't expose raw accounts to the script layer.
     if (rawDump) {
-      print('\n--- Raw account field dump (offset discovery) ---');
+      LogService.log('\n--- Raw account field dump (offset discovery) ---');
       for (final market in markets) {
         await _dumpRawFields(
           rpcClient: rpcClient,
@@ -192,10 +193,10 @@ void main(List<String> args) async {
     }
   } catch (e) {
     if (verbose) {
-      print('\nFailed to fetch balances!');
-      print('  Error: $e');
+      LogService.log('\nFailed to fetch balances!');
+      LogService.log('  Error: $e');
     }
-    print(jsonEncode({
+    LogService.log(jsonEncode({
       'success': false,
       'error': e.toString(),
     }));
@@ -234,28 +235,28 @@ Future<void> _dumpRawFields({
   final govAccount = accounts[0];
   final personalPosition = accounts[1];
 
-  print('\n${market.name} GovAccount (${govAccountKey.toBase58()}):');
+  LogService.log('\n${market.name} GovAccount (${govAccountKey.toBase58()}):');
   final govFields = SamsaraClient.dumpGovAccountFields(govAccount);
   if (govFields.isEmpty) {
-    print('  (not found or empty)');
+    LogService.log('  (not found or empty)');
   } else {
     for (final entry in govFields.entries) {
       final humanBase = entry.value / _pow10(market.baseDecimals);
       final humanPrana = entry.value / 1e6;
-      print('  offset ${entry.key}: ${entry.value}'
+      LogService.log('  offset ${entry.key}: ${entry.value}'
           '  (/${market.baseName}: ${humanBase.toStringAsFixed(8)})'
           '  (/prANA: ${humanPrana.toStringAsFixed(6)})');
     }
   }
 
-  print('\n${market.name} PersonalPosition (${personalPositionKey.toBase58()}):');
+  LogService.log('\n${market.name} PersonalPosition (${personalPositionKey.toBase58()}):');
   final posFields = SamsaraClient.dumpPersonalPositionFields(personalPosition);
   if (posFields.isEmpty) {
-    print('  (not found or empty)');
+    LogService.log('  (not found or empty)');
   } else {
     for (final entry in posFields.entries) {
       final humanBase = entry.value / _pow10(market.baseDecimals);
-      print('  offset ${entry.key}: ${entry.value}'
+      LogService.log('  offset ${entry.key}: ${entry.value}'
           '  (/${market.baseName}: ${humanBase.toStringAsFixed(8)})');
     }
   }

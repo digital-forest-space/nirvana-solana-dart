@@ -1,3 +1,4 @@
+import 'package:nirvana_solana/src/utils/log_service.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -20,15 +21,15 @@ import 'package:nirvana_solana/src/rpc/solana_rpc_client.dart';
 
 void main(List<String> args) async {
   if (args.length < 2) {
-    print('Usage: dart scripts/samsara/buy_nav_sol.dart <keypair_path> <sol_amount> [--rpc <url>] [--verbose]');
-    print('');
-    print('Options:');
-    print('  --rpc <url>  Custom RPC endpoint');
-    print('  --verbose    Show detailed output before JSON result');
-    print('  --dry-run    Build transaction but don\'t send');
-    print('');
-    print('Environment:');
-    print('  SOLANA_RPC_URL  RPC endpoint (overridden by --rpc)');
+    LogService.log('Usage: dart scripts/samsara/buy_nav_sol.dart <keypair_path> <sol_amount> [--rpc <url>] [--verbose]');
+    LogService.log('');
+    LogService.log('Options:');
+    LogService.log('  --rpc <url>  Custom RPC endpoint');
+    LogService.log('  --verbose    Show detailed output before JSON result');
+    LogService.log('  --dry-run    Build transaction but don\'t send');
+    LogService.log('');
+    LogService.log('Environment:');
+    LogService.log('  SOLANA_RPC_URL  RPC endpoint (overridden by --rpc)');
     exit(1);
   }
 
@@ -47,28 +48,28 @@ void main(List<String> args) async {
   }
 
   if (solAmount == null || solAmount <= 0) {
-    print(jsonEncode({'success': false, 'error': 'Invalid SOL amount: ${args[1]}'}));
+    LogService.log(jsonEncode({'success': false, 'error': 'Invalid SOL amount: ${args[1]}'}));
     exit(1);
   }
 
   // Load keypair
   final keypairFile = File(keypairPath);
   if (!keypairFile.existsSync()) {
-    print(jsonEncode({'success': false, 'error': 'Keypair file not found: $keypairPath'}));
+    LogService.log(jsonEncode({'success': false, 'error': 'Keypair file not found: $keypairPath'}));
     exit(1);
   }
 
-  if (verbose) print('Loading keypair from $keypairPath...');
+  if (verbose) LogService.log('Loading keypair from $keypairPath...');
   final keypairJson = keypairFile.readAsStringSync();
   final keypairBytes = (RegExp(r'\d+').allMatches(keypairJson).map((m) => int.parse(m.group(0)!)).toList());
   final keypair = await Ed25519HDKeyPair.fromPrivateKeyBytes(
     privateKey: keypairBytes.sublist(0, 32),
   );
   final userPubkey = keypair.publicKey.toBase58();
-  if (verbose) print('Wallet: $userPubkey');
+  if (verbose) LogService.log('Wallet: $userPubkey');
 
   // Create SamsaraClient
-  if (verbose) print('RPC: $rpcUrl');
+  if (verbose) LogService.log('RPC: $rpcUrl');
   final uri = Uri.parse(rpcUrl);
   final wsUrl = Uri.parse(rpcUrl.replaceFirst('https', 'wss'));
   final solanaClient = SolanaClient(
@@ -84,17 +85,17 @@ void main(List<String> args) async {
   final lamports = (solAmount * 1e9).toInt();
 
   if (verbose) {
-    print('\nTransaction:');
-    print('  Input: $solAmount SOL ($lamports lamports)');
-    print('  Market: ${market.name}');
+    LogService.log('\nTransaction:');
+    LogService.log('  Input: $solAmount SOL ($lamports lamports)');
+    LogService.log('  Market: ${market.name}');
   }
 
   // Get recent blockhash
   final blockhash = await rpcClient.getLatestBlockhash();
-  if (verbose) print('  Blockhash: $blockhash');
+  if (verbose) LogService.log('  Blockhash: $blockhash');
 
   // Build unsigned transaction via SamsaraClient
-  if (verbose) print('\nBuilding transaction...');
+  if (verbose) LogService.log('\nBuilding transaction...');
   final unsignedTxBytes = await client.buildUnsignedBuyNavSolTransaction(
     userPubkey: userPubkey,
     market: market,
@@ -106,10 +107,10 @@ void main(List<String> args) async {
   );
 
   if (dryRun) {
-    if (verbose) print('\nDry run - transaction not sent');
+    if (verbose) LogService.log('\nDry run - transaction not sent');
 
     final txBase64 = base64Encode(unsignedTxBytes);
-    print(jsonEncode({
+    LogService.log(jsonEncode({
       'success': true,
       'dryRun': true,
       'transaction': txBase64,
@@ -119,7 +120,7 @@ void main(List<String> args) async {
   }
 
   // Sign and send transaction
-  if (verbose) print('\nSigning and sending transaction...');
+  if (verbose) LogService.log('\nSigning and sending transaction...');
 
   try {
     final signedTxBytes = await _signTransaction(unsignedTxBytes, keypair);
@@ -130,12 +131,12 @@ void main(List<String> args) async {
     );
 
     if (verbose) {
-      print('\nTransaction sent!');
-      print('  Signature: $signature');
-      print('  Explorer: https://solscan.io/tx/$signature');
+      LogService.log('\nTransaction sent!');
+      LogService.log('  Signature: $signature');
+      LogService.log('  Explorer: https://solscan.io/tx/$signature');
     }
 
-    print(jsonEncode({
+    LogService.log(jsonEncode({
       'success': true,
       'signature': signature,
       'inputSol': solAmount,
@@ -144,10 +145,10 @@ void main(List<String> args) async {
     }));
   } catch (e) {
     if (verbose) {
-      print('\nTransaction failed!');
-      print('  Error: $e');
+      LogService.log('\nTransaction failed!');
+      LogService.log('  Error: $e');
     }
-    print(jsonEncode({
+    LogService.log(jsonEncode({
       'success': false,
       'error': e.toString(),
     }));

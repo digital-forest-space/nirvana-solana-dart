@@ -21,16 +21,16 @@ import 'package:solana/solana.dart';
 
 void main(List<String> args) async {
   if (args.length < 2) {
-    print('Usage: dart scripts/buy_ana_unsigned.dart <keypair_path> <amount> [--nirv|--usdc] [--rpc <url>] [--verbose]');
-    print('');
-    print('Options:');
-    print('  --nirv       Pay with NIRV (default)');
-    print('  --usdc       Pay with USDC');
-    print('  --rpc <url>  Custom RPC endpoint');
-    print('  --verbose    Show detailed output before JSON result');
-    print('');
-    print('Environment:');
-    print('  SOLANA_RPC_URL  RPC endpoint (overridden by --rpc)');
+    LogService.log('Usage: dart scripts/buy_ana_unsigned.dart <keypair_path> <amount> [--nirv|--usdc] [--rpc <url>] [--verbose]');
+    LogService.log('');
+    LogService.log('Options:');
+    LogService.log('  --nirv       Pay with NIRV (default)');
+    LogService.log('  --usdc       Pay with USDC');
+    LogService.log('  --rpc <url>  Custom RPC endpoint');
+    LogService.log('  --verbose    Show detailed output before JSON result');
+    LogService.log('');
+    LogService.log('Environment:');
+    LogService.log('  SOLANA_RPC_URL  RPC endpoint (overridden by --rpc)');
     exit(1);
   }
 
@@ -51,42 +51,42 @@ void main(List<String> args) async {
   }
 
   if (amount == null || amount <= 0) {
-    print(jsonEncode({'success': false, 'error': 'Invalid amount: ${args[1]}'}));
+    LogService.log(jsonEncode({'success': false, 'error': 'Invalid amount: ${args[1]}'}));
     exit(1);
   }
 
   // Load keypair
   final keypairFile = File(keypairPath);
   if (!keypairFile.existsSync()) {
-    print(jsonEncode({'success': false, 'error': 'Keypair file not found: $keypairPath'}));
+    LogService.log(jsonEncode({'success': false, 'error': 'Keypair file not found: $keypairPath'}));
     exit(1);
   }
 
-  if (verbose) print('Loading keypair from $keypairPath...');
+  if (verbose) LogService.log('Loading keypair from $keypairPath...');
   final keypairJson = keypairFile.readAsStringSync();
   final keypairBytes = (RegExp(r'\d+').allMatches(keypairJson).map((m) => int.parse(m.group(0)!)).toList());
   final keypair = await Ed25519HDKeyPair.fromPrivateKeyBytes(
     privateKey: keypairBytes.sublist(0, 32),
   );
   final userPubkey = keypair.publicKey.toBase58();
-  if (verbose) print('Wallet: $userPubkey');
+  if (verbose) LogService.log('Wallet: $userPubkey');
 
   // Create client
-  if (verbose) print('RPC: $rpcUrl');
+  if (verbose) LogService.log('RPC: $rpcUrl');
   final client = NirvanaClient.fromRpcUrl(rpcUrl);
 
   // Show current prices
-  if (verbose) print('\nFetching current floor price...');
+  if (verbose) LogService.log('\nFetching current floor price...');
   final floorPrice = await client.fetchFloorPrice();
-  if (verbose) print('  Floor price: \$${floorPrice.toStringAsFixed(6)}');
+  if (verbose) LogService.log('  Floor price: \$${floorPrice.toStringAsFixed(6)}');
 
   // Estimate ANA to receive
   final estimatedAna = amount / floorPrice * 0.97;
   if (verbose) {
-    print('\nTransaction:');
-    print('  Spending: $amount $paymentCurrency');
-    print('  Estimated ANA: ${estimatedAna.toStringAsFixed(6)} ANA (after ~3% fee)');
-    print('\nBuilding unsigned transaction...');
+    LogService.log('\nTransaction:');
+    LogService.log('  Spending: $amount $paymentCurrency');
+    LogService.log('  Estimated ANA: ${estimatedAna.toStringAsFixed(6)} ANA (after ~3% fee)');
+    LogService.log('\nBuilding unsigned transaction...');
   }
 
   try {
@@ -98,8 +98,8 @@ void main(List<String> args) async {
     );
 
     if (verbose) {
-      print('  Unsigned tx size: ${unsignedTxBytes.length} bytes');
-      print('\nSigning transaction...');
+      LogService.log('  Unsigned tx size: ${unsignedTxBytes.length} bytes');
+      LogService.log('\nSigning transaction...');
     }
 
     // Step 2: Parse the unsigned tx, sign it, and rebuild
@@ -107,8 +107,8 @@ void main(List<String> args) async {
     final signedTxBytes = await _signTransaction(unsignedTxBytes, keypair);
 
     if (verbose) {
-      print('  Signed tx size: ${signedTxBytes.length} bytes');
-      print('\nSending transaction...');
+      LogService.log('  Signed tx size: ${signedTxBytes.length} bytes');
+      LogService.log('\nSending transaction...');
     }
 
     // Step 3: Send the signed transaction
@@ -124,40 +124,40 @@ void main(List<String> args) async {
     );
 
     if (verbose) {
-      print('\n✅ Transaction sent!');
-      print('  Signature: $signature');
-      print('  Explorer: https://solscan.io/tx/$signature');
-      print('\nWaiting for confirmation...');
+      LogService.log('\n✅ Transaction sent!');
+      LogService.log('  Signature: $signature');
+      LogService.log('  Explorer: https://solscan.io/tx/$signature');
+      LogService.log('\nWaiting for confirmation...');
     }
 
     // Wait for confirmation
     await _waitForConfirmation(solanaClient, signature);
 
     if (verbose) {
-      print('  Confirmed!');
-      print('\nParsing transaction...');
+      LogService.log('  Confirmed!');
+      LogService.log('\nParsing transaction...');
     }
 
     // Parse the transaction
     try {
       final tx = await client.parseTransaction(signature);
       if (verbose) {
-        print('  Type: ${tx.type.name.toUpperCase()}');
+        LogService.log('  Type: ${tx.type.name.toUpperCase()}');
         for (final s in tx.sent) {
-          print('  Sent: ${s.amount.toStringAsFixed(6)} ${s.currency}');
+          LogService.log('  Sent: ${s.amount.toStringAsFixed(6)} ${s.currency}');
         }
         for (final r in tx.received) {
-          print('  Received: ${r.amount.toStringAsFixed(6)} ${r.currency}');
+          LogService.log('  Received: ${r.amount.toStringAsFixed(6)} ${r.currency}');
         }
-        if (tx.fee != null) print('  Fee: ${tx.fee!.amount.toStringAsFixed(6)} ${tx.fee!.currency}');
-        if (tx.pricePerAna != null) print('  Price: \$${tx.pricePerAna!.toStringAsFixed(6)} per ANA');
-        print('');
+        if (tx.fee != null) LogService.log('  Fee: ${tx.fee!.amount.toStringAsFixed(6)} ${tx.fee!.currency}');
+        if (tx.pricePerAna != null) LogService.log('  Price: \$${tx.pricePerAna!.toStringAsFixed(6)} per ANA');
+        LogService.log('');
       }
 
       // Output JSON result
-      print(jsonEncode(tx.toJson()));
+      LogService.log(jsonEncode(tx.toJson()));
     } catch (e) {
-      print(jsonEncode({
+      LogService.log(jsonEncode({
         'success': true,
         'signature': signature,
         'parseError': e.toString(),
@@ -166,10 +166,10 @@ void main(List<String> args) async {
     }
   } catch (e) {
     if (verbose) {
-      print('\n❌ Transaction failed!');
-      print('  Error: $e');
+      LogService.log('\n❌ Transaction failed!');
+      LogService.log('  Error: $e');
     }
-    print(jsonEncode({'success': false, 'error': e.toString()}));
+    LogService.log(jsonEncode({'success': false, 'error': e.toString()}));
     exit(1);
   }
 }

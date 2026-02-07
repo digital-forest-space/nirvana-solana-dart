@@ -4,7 +4,7 @@ import 'package:nirvana_solana/nirvana_solana.dart';
 /// Compares library output with expected account order from companion
 
 void main() {
-  print('Testing Buy ANA Instruction Building\n');
+  LogService.log('Testing Buy ANA Instruction Building\n');
 
   final builder = NirvanaTransactionBuilder();
 
@@ -28,7 +28,7 @@ void main() {
   // 10: User ANA account (destination)
   // 11-12: Token program (x2)
 
-  print('=== Test 1: Buy with NIRV (useNirv=true) ===\n');
+  LogService.log('=== Test 1: Buy with NIRV (useNirv=true) ===\n');
 
   final buyWithNirv = builder.buildBuyExact2Instruction(
     userPubkey: userPubkey,
@@ -39,29 +39,29 @@ void main() {
     useNirv: true,
   );
 
-  print('Instruction built with ${buyWithNirv.accounts.length} accounts:');
+  LogService.log('Instruction built with ${buyWithNirv.accounts.length} accounts:');
   for (int i = 0; i < buyWithNirv.accounts.length; i++) {
     final acc = buyWithNirv.accounts[i];
     final key = acc.pubKey.toBase58();
     final signer = acc.isSigner ? 'SIGNER' : '';
     final writable = acc.isWriteable ? 'W' : 'R';
-    print('  [$i] $key [$writable] $signer');
+    LogService.log('  [$i] $key [$writable] $signer');
   }
 
   // Verify key positions
-  print('\nVerification:');
+  LogService.log('\nVerification:');
   final acc9 = buyWithNirv.accounts[9].pubKey.toBase58();
   final acc10 = buyWithNirv.accounts[10].pubKey.toBase58();
 
-  print('  Position 9 (payment source): $acc9');
-  print('  Expected (userNirvAccount):  $userNirvAccount');
-  print('  Match: ${acc9 == userNirvAccount ? '✅' : '❌'}');
+  LogService.log('  Position 9 (payment source): $acc9');
+  LogService.log('  Expected (userNirvAccount):  $userNirvAccount');
+  LogService.log('  Match: ${acc9 == userNirvAccount ? '✅' : '❌'}');
 
-  print('  Position 10 (ANA destination): $acc10');
-  print('  Expected (userAnaAccount):     $userAnaAccount');
-  print('  Match: ${acc10 == userAnaAccount ? '✅' : '❌'}');
+  LogService.log('  Position 10 (ANA destination): $acc10');
+  LogService.log('  Expected (userAnaAccount):     $userAnaAccount');
+  LogService.log('  Match: ${acc10 == userAnaAccount ? '✅' : '❌'}');
 
-  print('\n=== Test 2: Buy with USDC (useNirv=false) ===\n');
+  LogService.log('\n=== Test 2: Buy with USDC (useNirv=false) ===\n');
 
   final buyWithUsdc = builder.buildBuyExact2Instruction(
     userPubkey: userPubkey,
@@ -72,29 +72,29 @@ void main() {
     useNirv: false,
   );
 
-  print('Instruction built with ${buyWithUsdc.accounts.length} accounts:');
+  LogService.log('Instruction built with ${buyWithUsdc.accounts.length} accounts:');
   final acc9Usdc = buyWithUsdc.accounts[9].pubKey.toBase58();
   final acc10Usdc = buyWithUsdc.accounts[10].pubKey.toBase58();
 
-  print('  Position 9 (payment source): $acc9Usdc');
-  print('  Expected (userUsdcAccount):  $userUsdcAccount');
-  print('  Match: ${acc9Usdc == userUsdcAccount ? '✅' : '❌'}');
+  LogService.log('  Position 9 (payment source): $acc9Usdc');
+  LogService.log('  Expected (userUsdcAccount):  $userUsdcAccount');
+  LogService.log('  Match: ${acc9Usdc == userUsdcAccount ? '✅' : '❌'}');
 
-  print('  Position 10 (ANA destination): $acc10Usdc');
-  print('  Expected (userAnaAccount):     $userAnaAccount');
-  print('  Match: ${acc10Usdc == userAnaAccount ? '✅' : '❌'}');
+  LogService.log('  Position 10 (ANA destination): $acc10Usdc');
+  LogService.log('  Expected (userAnaAccount):     $userAnaAccount');
+  LogService.log('  Match: ${acc10Usdc == userAnaAccount ? '✅' : '❌'}');
 
   // Check instruction data
-  print('\n=== Instruction Data ===');
+  LogService.log('\n=== Instruction Data ===');
   final data = buyWithNirv.data.toList();
-  print('Data length: ${data.length} bytes');
-  print('Discriminator: [${data.sublist(0, 8).join(', ')}]');
-  print('Expected:      [109, 5, 199, 243, 164, 233, 19, 152]');
+  LogService.log('Data length: ${data.length} bytes');
+  LogService.log('Discriminator: [${data.sublist(0, 8).join(', ')}]');
+  LogService.log('Expected:      [109, 5, 199, 243, 164, 233, 19, 152]');
 
   final discriminatorMatch = data.sublist(0, 8).toString() == [109, 5, 199, 243, 164, 233, 19, 152].toString();
-  print('Discriminator match: ${discriminatorMatch ? '✅' : '❌'}');
+  LogService.log('Discriminator match: ${discriminatorMatch ? '✅' : '❌'}');
 
-  print('\n=== Summary ===');
+  LogService.log('\n=== Summary ===');
   final allPassed = acc9 == userNirvAccount &&
       acc10 == userAnaAccount &&
       acc9Usdc == userUsdcAccount &&
@@ -102,8 +102,8 @@ void main() {
       discriminatorMatch;
 
   if (allPassed) {
-    print('All tests PASSED ✅');
+    LogService.log('All tests PASSED ✅');
   } else {
-    print('Some tests FAILED ❌');
+    LogService.log('Some tests FAILED ❌');
   }
 }

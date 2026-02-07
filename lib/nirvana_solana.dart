@@ -25,6 +25,7 @@ export 'src/instructions/transaction_builder.dart';
 export 'src/accounts/account_resolver.dart';
 
 // Utilities
+export 'src/utils/log_service.dart';
 export 'src/utils/retry.dart';
 
 // Samsara (navTokens derivatives)

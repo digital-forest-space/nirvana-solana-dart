@@ -1,3 +1,4 @@
+import 'package:nirvana_solana/src/utils/log_service.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
@@ -54,7 +55,7 @@ void main(List<String> args) async {
   final verbose = args.contains('--verbose');
   final jsonOutput = args.contains('--json');
 
-  if (verbose) print('Fetching earn page to discover JS chunks...');
+  if (verbose) LogService.log('Fetching earn page to discover JS chunks...');
 
   // 1. Fetch the earn page HTML
   final pageResponse = await http.get(Uri.parse('$_baseUrl$_earnPage'));
@@ -70,7 +71,7 @@ void main(List<String> args) async {
       .toSet()
       .toList();
 
-  if (verbose) print('Found ${chunkUrls.length} JS chunks');
+  if (verbose) LogService.log('Found ${chunkUrls.length} JS chunks');
 
   // 3. Download chunks until we find the PDA one
   String? pdaChunkUrl;
@@ -79,7 +80,7 @@ void main(List<String> args) async {
 
   for (final chunkPath in chunkUrls) {
     final url = '$_baseUrl/$chunkPath';
-    if (verbose) print('  Checking $chunkPath ...');
+    if (verbose) LogService.log('  Checking $chunkPath ...');
 
     final response = await http.get(Uri.parse(url));
     if (response.statusCode != 200) continue;
@@ -88,7 +89,7 @@ void main(List<String> args) async {
     if (body.contains('SamsaraPda') && body.contains('MayflowerPda')) {
       pdaChunkUrl = chunkPath;
       pdaChunkContent = body;
-      if (verbose) print('  -> Found PDA chunk: $chunkPath (${body.length} bytes)');
+      if (verbose) LogService.log('  -> Found PDA chunk: $chunkPath (${body.length} bytes)');
 
       // Extract IDL version
       final idlMatch = RegExp(r't\.IDL=\{version:"([^"]+)"').firstMatch(body);
@@ -109,15 +110,15 @@ void main(List<String> args) async {
   final remoteMayflower = _extractSeeds(lines, 'MayflowerPda');
 
   if (verbose) {
-    print('\nExtracted from JS bundle:');
-    print('  IDL version: ${idlVersion ?? "unknown"}');
-    print('  Samsara seeds: ${remoteSamsara.length} methods');
+    LogService.log('\nExtracted from JS bundle:');
+    LogService.log('  IDL version: ${idlVersion ?? "unknown"}');
+    LogService.log('  Samsara seeds: ${remoteSamsara.length} methods');
     for (final e in remoteSamsara.entries) {
-      print('    ${e.key}: ${e.value}');
+      LogService.log('    ${e.key}: ${e.value}');
     }
-    print('  Mayflower seeds: ${remoteMayflower.length} methods');
+    LogService.log('  Mayflower seeds: ${remoteMayflower.length} methods');
     for (final e in remoteMayflower.entries) {
-      print('    ${e.key}: ${e.value}');
+      LogService.log('    ${e.key}: ${e.value}');
     }
   }
 
@@ -128,14 +129,14 @@ void main(List<String> args) async {
   final allMatch = samsaraResult['match'] == true && mayflowerResult['match'] == true;
 
   if (verbose) {
-    print('\n=== Comparison Results ===');
+    LogService.log('\n=== Comparison Results ===');
     _printComparison('Samsara', samsaraResult);
     _printComparison('Mayflower', mayflowerResult);
-    print('');
+    LogService.log('');
     if (allMatch) {
-      print('All PDA seeds match.');
+      LogService.log('All PDA seeds match.');
     } else {
-      print('WARNING: PDA seed mismatches detected! Update pda.dart and pda_seeds.md.');
+      LogService.log('WARNING: PDA seed mismatches detected! Update pda.dart and pda_seeds.md.');
     }
   }
 
@@ -148,7 +149,7 @@ void main(List<String> args) async {
     'mayflower': mayflowerResult,
   };
 
-  print(jsonEncode(output));
+  LogService.log(jsonEncode(output));
   exit(allMatch ? 0 : 1);
 }
 
@@ -279,38 +280,38 @@ bool _listEquals(List<String> a, List<String> b) {
 }
 
 void _printComparison(String program, Map<String, dynamic> result) {
-  print('\n$program:');
+  LogService.log('\n$program:');
   final matching = result['matching'] as List;
-  print('  Matching: ${matching.length} (${matching.join(", ")})');
+  LogService.log('  Matching: ${matching.length} (${matching.join(", ")})');
 
   final mismatched = result['mismatched'] as Map<String, dynamic>?;
   if (mismatched != null) {
-    print('  MISMATCHED: ${mismatched.length}');
+    LogService.log('  MISMATCHED: ${mismatched.length}');
     for (final e in mismatched.entries) {
       final info = e.value as Map<String, dynamic>;
-      print('    ${e.key}: known=${info["known"]} remote=${info["remote"]}');
+      LogService.log('    ${e.key}: known=${info["known"]} remote=${info["remote"]}');
     }
   }
 
   final missing = result['missing'] as List?;
   if (missing != null) {
-    print('  MISSING from remote: ${missing.join(", ")}');
+    LogService.log('  MISSING from remote: ${missing.join(", ")}');
   }
 
   final added = result['added'] as Map<String, dynamic>?;
   if (added != null) {
-    print('  NEW in remote: ${added.length}');
+    LogService.log('  NEW in remote: ${added.length}');
     for (final e in added.entries) {
-      print('    ${e.key}: ${e.value}');
+      LogService.log('    ${e.key}: ${e.value}');
     }
   }
 }
 
 Never _fail(bool jsonOutput, String message) {
   if (jsonOutput) {
-    print(jsonEncode({'success': false, 'error': message}));
+    LogService.log(jsonEncode({'success': false, 'error': message}));
   } else {
-    print('ERROR: $message');
+    LogService.log('ERROR: $message');
   }
   exit(1);
 }

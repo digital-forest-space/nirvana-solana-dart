@@ -1,3 +1,4 @@
+import 'package:nirvana_solana/src/utils/log_service.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
@@ -16,7 +17,7 @@ void main() async {
   };
 
   for (final entry in accounts.entries) {
-    print('\n=== ${entry.key}: ${entry.value} ===');
+    LogService.log('\n=== ${entry.key}: ${entry.value} ===');
     await checkAccount(rpcUrl, entry.value);
   }
 }
@@ -45,36 +46,36 @@ Future<void> checkAccount(String rpcUrl, String pubkey) async {
       final lamports = value['lamports'];
       final executable = value['executable'];
 
-      print('  Owner: $owner');
-      print('  Lamports: $lamports');
-      print('  Executable: $executable');
-      print('  Data length: $dataLen');
+      LogService.log('  Owner: $owner');
+      LogService.log('  Lamports: $lamports');
+      LogService.log('  Executable: $executable');
+      LogService.log('  Data length: $dataLen');
 
       // Check if it's a token account
       if (owner == 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') {
         final parsed = value['data']['parsed'];
         if (parsed != null) {
           final info = parsed['info'];
-          print('  Token Account Info:');
-          print('    Mint: ${info['mint']}');
-          print('    Owner: ${info['owner']}');
-          print('    Amount: ${info['tokenAmount']['uiAmount']}');
+          LogService.log('  Token Account Info:');
+          LogService.log('    Mint: ${info['mint']}');
+          LogService.log('    Owner: ${info['owner']}');
+          LogService.log('    Amount: ${info['tokenAmount']['uiAmount']}');
         }
       } else {
         // Print first 100 bytes of raw data
         if (value['data'] is List && value['data'].isNotEmpty) {
           final rawData = value['data'][0];
           final preview = rawData.length > 100 ? rawData.substring(0, 100) : rawData;
-          print('  Data preview (base64): $preview...');
+          LogService.log('  Data preview (base64): $preview...');
         }
       }
     } else {
-      print('  Account not found or error');
+      LogService.log('  Account not found or error');
       if (result['error'] != null) {
-        print('  Error: ${result['error']}');
+        LogService.log('  Error: ${result['error']}');
       }
     }
   } catch (e) {
-    print('  Error: $e');
+    LogService.log('  Error: $e');
   }
 }
