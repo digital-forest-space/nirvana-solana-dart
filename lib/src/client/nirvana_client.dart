@@ -883,7 +883,27 @@ class NirvanaClient {
       throw Exception('Failed to get personal account info: $e');
     }
   }
-  
+
+  /// Get the user's NIRV borrow capacity: debt, limit, and available.
+  ///
+  /// Returns `{'debt': ..., 'limit': ..., 'available': ...}` in NIRV.
+  /// Returns null if the user has no staking position.
+  Future<Map<String, double>?> getBorrowCapacity(String userPubkey) async {
+    final personalInfo = await getPersonalAccountInfo(userPubkey);
+    if (personalInfo == null) return null;
+
+    final floorPrice = await fetchFloorPrice();
+    final debt = personalInfo.anaDebt;
+    final limit = personalInfo.stakedAna * floorPrice;
+    final available = limit > debt ? limit - debt : 0.0;
+
+    return {
+      'debt': debt,
+      'limit': limit,
+      'available': available,
+    };
+  }
+
   /// Get user's token balances (ANA, NIRV, USDC, prANA)
   Future<Map<String, double>> getUserBalances(String userPubkey) async {
     return await _accountResolver.getUserBalances(userPubkey);

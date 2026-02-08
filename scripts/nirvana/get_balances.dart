@@ -53,8 +53,8 @@ void main(List<String> args) async {
   // Get claimable prANA (calculated from counters)
   final claimablePrana = await client.getClaimablePrana(pubkey);
 
-  // Get floor price for borrow limit calculation
-  final floorPrice = await client.fetchFloorPrice();
+  // Get borrow capacity (debt, limit, available)
+  final borrowCapacity = await client.getBorrowCapacity(pubkey);
 
   // Get claimable revenue share
   // First check if already staged (fast), if 0 then simulate to get preview
@@ -64,11 +64,6 @@ void main(List<String> args) async {
     claimableRevshare = await client.getClaimableRevshareViaSimulation(pubkey);
   }
 
-  final stakedAna = personalInfo?.stakedAna ?? 0.0;
-  final debt = personalInfo?.anaDebt ?? 0.0;
-  final borrowLimit = stakedAna * floorPrice;
-  final borrowable = borrowLimit > debt ? borrowLimit - debt : 0.0;
-
   final result = {
     'wallet': {
       'ANA': walletBalances['ANA'] ?? 0.0,
@@ -77,14 +72,11 @@ void main(List<String> args) async {
       'prANA': walletBalances['prANA'] ?? 0.0,
     },
     'staked': {
-      'ANA': stakedAna,
+      'ANA': personalInfo?.stakedAna ?? 0.0,
       'prANA': personalInfo?.stakedPrana ?? 0.0,
     },
-    'borrow': {
-      'debt': debt,
-      'limit': borrowLimit,
-      'available': borrowable,
-    },
+    if (borrowCapacity != null)
+      'borrow': borrowCapacity,
     'claimable': {
       'prANA': claimablePrana,
       'ANA_revshare': claimableRevshare['ANA'] ?? 0.0,
@@ -103,10 +95,12 @@ void main(List<String> args) async {
       LogService.log('\n=== Staking Position ===');
       LogService.log('  Staked ANA:   ${personalInfo.stakedAna.toStringAsFixed(6)}');
       LogService.log('  Staked prANA: ${personalInfo.stakedPrana.toStringAsFixed(6)}');
-      LogService.log('\n=== Borrow ===');
-      LogService.log('  Debt:       ${debt.toStringAsFixed(6)} NIRV');
-      LogService.log('  Limit:      ${borrowLimit.toStringAsFixed(6)} NIRV');
-      LogService.log('  Available:  ${borrowable.toStringAsFixed(6)} NIRV');
+      if (borrowCapacity != null) {
+        LogService.log('\n=== Borrow ===');
+        LogService.log('  Debt:       ${borrowCapacity['debt']!.toStringAsFixed(6)} NIRV');
+        LogService.log('  Limit:      ${borrowCapacity['limit']!.toStringAsFixed(6)} NIRV');
+        LogService.log('  Available:  ${borrowCapacity['available']!.toStringAsFixed(6)} NIRV');
+      }
       LogService.log('\n=== Claimable ===');
       LogService.log('  prANA: ${claimablePrana.toStringAsFixed(6)}');
       LogService.log('\n=== Claimable Revenue Share ===');
