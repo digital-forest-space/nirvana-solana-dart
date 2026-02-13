@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:solana/solana.dart';
 import 'package:nirvana_solana/src/samsara/config.dart';
 import 'package:nirvana_solana/src/samsara/samsara_client.dart';
-import 'package:nirvana_solana/src/models/transaction_price_result.dart';
 import 'package:nirvana_solana/src/rpc/solana_rpc_client.dart';
 
 /// Fetch the latest navToken price and floor price for Samsara markets.
@@ -70,23 +69,22 @@ void main(List<String> args) async {
   final client = SamsaraClient(rpcClient: rpcClient);
 
   try {
-    // Fetch market price and floor price in parallel for all markets
-    final futures = <Future>[];
-    for (final market in markets) {
-      futures.add(client.fetchLatestNavTokenPriceWithPaging(
+    // Fetch floor prices in one batched RPC call, market prices in parallel
+    final floorPricesFuture = client.fetchAllFloorPrices(markets: markets);
+    final priceFutures = markets.map((market) =>
+      client.fetchLatestNavTokenPriceWithPaging(
         market,
         pageSize: 10,
         initialDelayMs: 200,
-      ));
-      futures.add(client.fetchFloorPrice(market));
-    }
-    final results = await Future.wait(futures);
+      )).toList();
+    final priceResults = await Future.wait(priceFutures);
+    final floorPrices = await floorPricesFuture;
 
     final resultList = <Map<String, dynamic>>[];
     for (var i = 0; i < markets.length; i++) {
       final market = markets[i];
-      final priceResult = results[i * 2] as TransactionPriceResult;
-      final floorPrice = results[i * 2 + 1] as double;
+      final priceResult = priceResults[i];
+      final floorPrice = floorPrices[market.name]!;
 
       if (verbose) {
         final decimals = market.baseDecimals > 6 ? 8 : 6;

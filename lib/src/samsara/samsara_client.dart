@@ -504,9 +504,36 @@ class SamsaraClient {
   Future<double> fetchFloorPrice(NavTokenMarket market) async {
     final accountInfo =
         await _rpcClient.getAccountInfo(market.mayflowerMarket);
+    return _parseFloorPriceFromAccount(accountInfo, market);
+  }
 
-    if (accountInfo.isEmpty || accountInfo['data'] == null) {
-      throw Exception('Mayflower Market account not found: ${market.mayflowerMarket}');
+  /// Fetches floor prices for multiple markets in a single batched RPC call.
+  ///
+  /// Returns a map of market name to floor price in base token units.
+  Future<Map<String, double>> fetchAllFloorPrices({
+    required List<NavTokenMarket> markets,
+    int batchSize = 30,
+  }) async {
+    final addresses = markets.map((m) => m.mayflowerMarket).toList();
+    final accounts = await _rpcClient.getMultipleAccounts(
+        addresses, batchSize: batchSize);
+
+    final results = <String, double>{};
+    for (var i = 0; i < markets.length; i++) {
+      results[markets[i].name] =
+          _parseFloorPriceFromAccount(accounts[i], markets[i]);
+    }
+    return results;
+  }
+
+  /// Parses floor price from a Mayflower Market account's raw data.
+  static double _parseFloorPriceFromAccount(
+      Map<String, dynamic>? accountInfo, NavTokenMarket market) {
+    if (accountInfo == null ||
+        accountInfo.isEmpty ||
+        accountInfo['data'] == null) {
+      throw Exception(
+          'Mayflower Market account not found: ${market.mayflowerMarket}');
     }
 
     final base64Data = accountInfo['data']?[0] as String?;
