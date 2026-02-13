@@ -192,4 +192,17 @@ class MayflowerPda {
         ],
         programId: mayflowerProgramId,
       );
+
+  /// Liquidity vault main authority PDA.
+  /// Seeds: ["liq_vault_main", marketMetaAddress]
+  Future<Ed25519HDPublicKey> liqVaultMain({
+    required Ed25519HDPublicKey marketMeta,
+  }) =>
+      Ed25519HDPublicKey.findProgramAddress(
+        seeds: [
+          'liq_vault_main'.codeUnits,
+          marketMeta.bytes,
+        ],
+        programId: mayflowerProgramId,
+      );
 }

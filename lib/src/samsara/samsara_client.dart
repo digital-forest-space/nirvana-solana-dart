@@ -526,6 +526,156 @@ class SamsaraClient {
     return results;
   }
 
+  /// Discovers all navToken markets from on-chain Mayflower program data.
+  ///
+  /// Algorithm (3 RPC calls):
+  /// 1. `getProgramAccounts` for all MarketLinear accounts (304 bytes)
+  /// 2. `getMultipleAccounts` to batch-fetch MarketMeta accounts (488 bytes)
+  /// 3. `getMultipleAccounts` to batch-fetch SPL Mint accounts for decimals
+  ///
+  /// PDAs (samsaraMarket, authorityPda) are derived locally with no RPC.
+  /// Names are resolved from [NavTokenMarket.wellKnownMints], falling back to
+  /// truncated pubkey for unknown mints.
+  Future<List<NavTokenMarket>> discoverMarkets({int batchSize = 30}) async {
+    final samsaraPda =
+        SamsaraPda(Ed25519HDPublicKey.fromBase58(_config.samsaraProgramId));
+    final mayflowerPda =
+        MayflowerPda(Ed25519HDPublicKey.fromBase58(_config.mayflowerProgramId));
+
+    // 1. Fetch all MarketLinear accounts (304 bytes)
+    final marketLinearAccounts = await _rpcClient.getProgramAccounts(
+      _config.mayflowerProgramId,
+      dataSize: 304,
+    );
+
+    if (marketLinearAccounts.isEmpty) return [];
+
+    // Extract marketMetadata pubkey (offset 8-40) from each MarketLinear
+    final metadataAddresses = <String>[];
+    final mayflowerMarketPubkeys = <String>[];
+    for (final account in marketLinearAccounts) {
+      final bytes = _decodeAccountData(account['account']);
+      if (bytes.length < 40) continue;
+      metadataAddresses.add(_bytesToBase58(bytes.sublist(8, 40)));
+      mayflowerMarketPubkeys.add(account['pubkey'] as String);
+    }
+
+    // 2. Batch-fetch all MarketMeta accounts (488 bytes)
+    final metaAccounts = await _rpcClient.getMultipleAccounts(
+        metadataAddresses,
+        batchSize: batchSize);
+
+    // Parse MarketMeta fields and collect unique mints
+    final mintSet = <String>{};
+    final parsedMetas = <_ParsedMarketMeta>[];
+
+    for (var i = 0; i < metaAccounts.length; i++) {
+      final metaAccount = metaAccounts[i];
+      if (metaAccount == null) continue;
+
+      final bytes = _decodeAccountData(metaAccount);
+      if (bytes.length < 296) continue;
+
+      final baseMint = _bytesToBase58(bytes.sublist(8, 40));
+      final navMint = _bytesToBase58(bytes.sublist(40, 72));
+      final marketGroup = _bytesToBase58(bytes.sublist(104, 136));
+      final baseVault = _bytesToBase58(bytes.sublist(200, 232));
+      final navVault = _bytesToBase58(bytes.sublist(232, 264));
+      final feeVault = _bytesToBase58(bytes.sublist(264, 296));
+
+      mintSet.add(baseMint);
+      mintSet.add(navMint);
+
+      parsedMetas.add(_ParsedMarketMeta(
+        mayflowerMarket: mayflowerMarketPubkeys[i],
+        marketMetadata: metadataAddresses[i],
+        baseMint: baseMint,
+        navMint: navMint,
+        marketGroup: marketGroup,
+        baseVault: baseVault,
+        navVault: navVault,
+        feeVault: feeVault,
+      ));
+    }
+
+    // 3. Batch-fetch SPL Mint accounts for decimals
+    final mintList = mintSet.toList();
+    final mintAccounts = await _rpcClient.getMultipleAccounts(mintList,
+        batchSize: batchSize);
+    final mintDecimals = <String, int>{};
+    for (var i = 0; i < mintList.length; i++) {
+      mintDecimals[mintList[i]] = _parseMintDecimals(mintAccounts[i]);
+    }
+
+    // 4. Derive PDAs and build NavTokenMarket objects
+    final markets = <NavTokenMarket>[];
+    for (final meta in parsedMetas) {
+      final metaKey = Ed25519HDPublicKey.fromBase58(meta.marketMetadata);
+      final samsaraMarketKey = await samsaraPda.market(marketMeta: metaKey);
+      final authorityPdaKey =
+          await mayflowerPda.liqVaultMain(marketMeta: metaKey);
+
+      // Resolve names from well-known mints
+      final navInfo = NavTokenMarket.wellKnownMints[meta.navMint];
+      final baseInfo = NavTokenMarket.wellKnownMints[meta.baseMint];
+      final name = navInfo?.symbol ?? 'nav_${meta.navMint.substring(0, 8)}';
+      final baseName =
+          baseInfo?.symbol ?? meta.baseMint.substring(0, 8);
+
+      markets.add(NavTokenMarket(
+        name: name,
+        baseName: baseName,
+        baseMint: meta.baseMint,
+        navMint: meta.navMint,
+        samsaraMarket: samsaraMarketKey.toBase58(),
+        mayflowerMarket: meta.mayflowerMarket,
+        marketMetadata: meta.marketMetadata,
+        marketGroup: meta.marketGroup,
+        marketSolVault: meta.baseVault,
+        marketNavVault: meta.navVault,
+        feeVault: meta.feeVault,
+        authorityPda: authorityPdaKey.toBase58(),
+        baseDecimals: mintDecimals[meta.baseMint] ?? 9,
+        navDecimals: mintDecimals[meta.navMint] ?? 9,
+      ));
+    }
+
+    return markets;
+  }
+
+  /// Parses SPL Mint decimals (u8 at byte offset 44).
+  static int _parseMintDecimals(Map<String, dynamic>? account) {
+    if (account == null || account['data'] == null) return 9;
+    final dataArray = account['data'] as List<dynamic>?;
+    if (dataArray == null || dataArray.isEmpty) return 9;
+    final base64Data = dataArray[0] as String?;
+    if (base64Data == null || base64Data.isEmpty) return 9;
+    final bytes = base64Decode(base64Data);
+    if (bytes.length < 45) return 9;
+    return bytes[44];
+  }
+
+  /// Converts raw bytes to a base58-encoded pubkey string.
+  static String _bytesToBase58(Uint8List bytes) {
+    return Ed25519HDPublicKey(bytes.toList()).toBase58();
+  }
+
+  /// Decodes base64 account data from an RPC response.
+  static Uint8List _decodeAccountData(dynamic accountOrInfo) {
+    if (accountOrInfo is Map<String, dynamic>) {
+      final data = accountOrInfo['data'];
+      String? base64Data;
+      if (data is List) {
+        base64Data = data[0] as String?;
+      } else if (data is Map) {
+        base64Data = data['data']?[0] as String?;
+      }
+      if (base64Data == null || base64Data.isEmpty) return Uint8List(0);
+      return Uint8List.fromList(base64Decode(base64Data));
+    }
+    return Uint8List(0);
+  }
+
   /// Parses floor price from a Mayflower Market account's raw data.
   static double _parseFloorPriceFromAccount(
       Map<String, dynamic>? accountInfo, NavTokenMarket market) {
@@ -1564,5 +1714,28 @@ class _MarketSlice {
     required this.pranaEscrowIndex,
     required this.govAccountIndex,
     required this.personalPositionIndex,
+  });
+}
+
+/// Parsed fields from a MarketMeta on-chain account.
+class _ParsedMarketMeta {
+  final String mayflowerMarket;
+  final String marketMetadata;
+  final String baseMint;
+  final String navMint;
+  final String marketGroup;
+  final String baseVault;
+  final String navVault;
+  final String feeVault;
+
+  const _ParsedMarketMeta({
+    required this.mayflowerMarket,
+    required this.marketMetadata,
+    required this.baseMint,
+    required this.navMint,
+    required this.marketGroup,
+    required this.baseVault,
+    required this.navVault,
+    required this.feeVault,
   });
 }

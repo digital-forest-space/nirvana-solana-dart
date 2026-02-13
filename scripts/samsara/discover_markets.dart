@@ -4,34 +4,16 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:solana/solana.dart';
 import 'package:nirvana_solana/src/samsara/config.dart';
-import 'package:nirvana_solana/src/samsara/pda.dart';
+import 'package:nirvana_solana/src/samsara/samsara_client.dart';
 import 'package:nirvana_solana/src/rpc/solana_rpc_client.dart';
 
 /// Discover all Samsara navToken markets from on-chain data.
 ///
 /// Usage: dart scripts/samsara/discover_markets.dart [--verbose] [--health]
 ///
-/// Queries getProgramAccounts for all Mayflower Market accounts (304 bytes),
-/// then fetches each market's Market Metadata to extract mints and vaults,
-/// and resolves token names via Metaplex Token Metadata.
-///
-/// With --health, also fetches per-market health signals (extra RPC calls):
-///   - navSupply: total circulating supply of the nav token
-///   - baseVaultBalance: base token balance in the market vault
-///   - lastTxTime: unix timestamp of the most recent transaction
-///
-/// Market Metadata layout (488 bytes, discovered from navSOL reference):
-///   offset   8: baseMint (32 bytes)
-///   offset  40: navMint (32 bytes)
-///   offset 104: marketGroup (32 bytes)
-///   offset 136: mayflowerMarket (32 bytes)
-///   offset 200: baseVault (32 bytes)
-///   offset 232: navVault (32 bytes)
-///   offset 264: feeVault (32 bytes)
-///
-/// Mayflower Market layout (304 bytes):
-///   offset   8: marketMetadata (32 bytes)
-///   offset 104: floorPrice (16 bytes, Rust Decimal)
+/// Uses [SamsaraClient.discoverMarkets] for core discovery (3 RPC calls),
+/// then enriches with Metaplex token names, config comparison, and optional
+/// health signals (navSupply, baseVaultBalance, lastTxTime).
 
 const _metaplexProgramId = 'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s';
 
@@ -49,62 +31,28 @@ void main(List<String> args) async {
     timeout: const Duration(seconds: 30),
   );
   final rpcClient = DefaultSolanaRpcClient(solanaClient, rpcUrl: uri);
-  final config = SamsaraConfig.mainnet();
-  final pda = SamsaraPda.mainnet();
+  final client = SamsaraClient(rpcClient: rpcClient);
 
-  if (verbose) LogService.log('Fetching all Mayflower Market accounts...\n');
+  if (verbose) LogService.log('Discovering markets via SamsaraClient...\n');
 
-  final mayflowerMarkets = await rpcClient.getProgramAccounts(
-    config.mayflowerProgramId,
-    dataSize: 304,
-  );
+  // Core discovery: 3 batched RPC calls
+  final discovered = await client.discoverMarkets();
 
-  if (verbose) LogService.log('Found ${mayflowerMarkets.length} markets\n');
+  if (verbose) LogService.log('Found ${discovered.length} markets\n');
 
-  // Collect all nav and base mints for batch metadata lookup
-  final results = <Map<String, dynamic>>[];
+  // Collect all mints for Metaplex name resolution
   final allMints = <String>{};
-
-  for (final marketAccount in mayflowerMarkets) {
-    final mayflowerPubkey = marketAccount['pubkey'] as String;
-    final marketBytes = _decodeAccountData(marketAccount['account']);
-
-    final metadataPubkey = _bytesToBase58(marketBytes.sublist(8, 40));
-    final floorPrice = _decodeRustDecimal(marketBytes.sublist(104, 120));
-
-    await Future.delayed(const Duration(milliseconds: 500));
-    final mdInfo = await rpcClient.getAccountInfo(metadataPubkey);
-    final mdBytes = _decodeAccountData(mdInfo);
-    if (mdBytes.length < 296) continue;
-
-    final baseMint = _bytesToBase58(mdBytes.sublist(8, 40));
-    final navMint = _bytesToBase58(mdBytes.sublist(40, 72));
-    final marketGroup = _bytesToBase58(mdBytes.sublist(104, 136));
-    final baseVault = _bytesToBase58(mdBytes.sublist(200, 232));
-    final navVault = _bytesToBase58(mdBytes.sublist(232, 264));
-    final feeVault = _bytesToBase58(mdBytes.sublist(264, 296));
-
-    allMints.add(navMint);
-    allMints.add(baseMint);
-
-    // Derive Samsara market address from marketMetadata PDA
-    final samsaraMarket = await pda.market(
-      marketMeta: Ed25519HDPublicKey.fromBase58(metadataPubkey),
-    );
-
-    results.add({
-      'mayflowerMarket': mayflowerPubkey,
-      'samsaraMarket': samsaraMarket.toBase58(),
-      'marketMetadata': metadataPubkey,
-      'baseMint': baseMint,
-      'navMint': navMint,
-      'marketGroup': marketGroup,
-      'baseVault': baseVault,
-      'navVault': navVault,
-      'feeVault': feeVault,
-      'floorPrice': floorPrice,
-    });
+  for (final m in discovered) {
+    allMints.add(m.navMint);
+    allMints.add(m.baseMint);
   }
+
+  // Resolve Metaplex token metadata (overrides library well-known names)
+  if (verbose) LogService.log('Resolving token names for ${allMints.length} mints...\n');
+  final tokenNames = await _resolveTokenNames(rpcClient, allMints.toList());
+
+  // Fetch floor prices in one batched RPC call
+  final floorPrices = await client.fetchAllFloorPrices(markets: discovered);
 
   // Build lookup of configured markets by navMint for comparison
   final configByNavMint = <String, NavTokenMarket>{};
@@ -112,49 +60,65 @@ void main(List<String> args) async {
     configByNavMint[m.navMint] = m;
   }
 
-  // Resolve Metaplex token metadata for all mints
-  if (verbose) LogService.log('Resolving token names for ${allMints.length} mints...\n');
-  final tokenNames = await _resolveTokenNames(rpcClient, allMints.toList());
+  // Build enriched results
+  final results = <Map<String, dynamic>>[];
+  for (final m in discovered) {
+    final navMeta = tokenNames[m.navMint];
+    final baseMeta = tokenNames[m.baseMint];
 
-  // Attach names to results
-  for (final m in results) {
-    final navMint = m['navMint'] as String;
-    final baseMint = m['baseMint'] as String;
-    final navMeta = tokenNames[navMint];
-    final baseMeta = tokenNames[baseMint];
+    final result = <String, dynamic>{
+      'mayflowerMarket': m.mayflowerMarket,
+      'samsaraMarket': m.samsaraMarket,
+      'marketMetadata': m.marketMetadata,
+      'baseMint': m.baseMint,
+      'navMint': m.navMint,
+      'marketGroup': m.marketGroup,
+      'baseVault': m.marketSolVault,
+      'navVault': m.marketNavVault,
+      'feeVault': m.feeVault,
+      'authorityPda': m.authorityPda,
+      'baseDecimals': m.baseDecimals,
+      'navDecimals': m.navDecimals,
+      'floorPrice': floorPrices[m.name] ?? 0.0,
+    };
+
+    // Attach Metaplex names (override library well-known names when available)
     if (navMeta != null) {
-      m['navName'] = navMeta['name'];
-      m['navSymbol'] = navMeta['symbol'];
+      result['navName'] = navMeta['name'];
+      result['navSymbol'] = navMeta['symbol'];
+    } else {
+      result['navSymbol'] = m.name;
     }
     if (baseMeta != null) {
-      m['baseName'] = baseMeta['name'];
-      m['baseSymbol'] = baseMeta['symbol'];
+      result['baseName'] = baseMeta['name'];
+      result['baseSymbol'] = baseMeta['symbol'];
+    } else {
+      result['baseSymbol'] = m.baseName;
     }
-  }
 
-  // Check each market against library config
-  for (final m in results) {
-    final navMint = m['navMint'] as String;
-    final cfg = configByNavMint[navMint];
-    m['supported'] = cfg != null;
+    // Config comparison
+    final cfg = configByNavMint[m.navMint];
+    result['supported'] = cfg != null;
 
     if (cfg != null) {
       final mismatches = <String>[];
-      if (cfg.mayflowerMarket != m['mayflowerMarket']) mismatches.add('mayflowerMarket');
-      if (cfg.samsaraMarket != m['samsaraMarket']) mismatches.add('samsaraMarket');
-      if (cfg.marketMetadata != m['marketMetadata']) mismatches.add('marketMetadata');
-      if (cfg.baseMint != m['baseMint']) mismatches.add('baseMint');
-      if (cfg.marketGroup != m['marketGroup']) mismatches.add('marketGroup');
-      if (cfg.marketSolVault != m['baseVault']) mismatches.add('baseVault');
-      if (cfg.marketNavVault != m['navVault']) mismatches.add('navVault');
-      if (cfg.feeVault != m['feeVault']) mismatches.add('feeVault');
-      m['configMatch'] = mismatches.isEmpty;
+      if (cfg.mayflowerMarket != m.mayflowerMarket) mismatches.add('mayflowerMarket');
+      if (cfg.samsaraMarket != m.samsaraMarket) mismatches.add('samsaraMarket');
+      if (cfg.marketMetadata != m.marketMetadata) mismatches.add('marketMetadata');
+      if (cfg.baseMint != m.baseMint) mismatches.add('baseMint');
+      if (cfg.marketGroup != m.marketGroup) mismatches.add('marketGroup');
+      if (cfg.marketSolVault != m.marketSolVault) mismatches.add('baseVault');
+      if (cfg.marketNavVault != m.marketNavVault) mismatches.add('navVault');
+      if (cfg.feeVault != m.feeVault) mismatches.add('feeVault');
+      result['configMatch'] = mismatches.isEmpty;
       if (mismatches.isNotEmpty) {
-        m['configMismatches'] = mismatches;
+        result['configMismatches'] = mismatches;
       }
     } else {
-      m['configMatch'] = null;
+      result['configMatch'] = null;
     }
+
+    results.add(result);
   }
 
   // Health signals: nav supply, vault balance, transaction recency
@@ -196,6 +160,7 @@ void main(List<String> args) async {
       LogService.log('  Base Vault:       ${m['baseVault']}');
       LogService.log('  Nav Vault:        ${m['navVault']}');
       LogService.log('  Fee Vault:        ${m['feeVault']}');
+      LogService.log('  Authority PDA:    ${m['authorityPda']}');
       final supported = m['supported'] as bool;
       final configMatch = m['configMatch'];
       LogService.log('  Supported:        $supported');
@@ -399,37 +364,4 @@ Map<String, String>? _parseMetaplexMetadata(Uint8List data) {
       .trim();
 
   return {'name': name, 'symbol': symbol};
-}
-
-Uint8List _decodeAccountData(dynamic accountOrInfo) {
-  if (accountOrInfo is Map<String, dynamic>) {
-    final data = accountOrInfo['data'];
-    String? base64Data;
-    if (data is List) {
-      base64Data = data[0] as String?;
-    } else if (data is Map) {
-      base64Data = data['data']?[0] as String?;
-    }
-    if (base64Data == null || base64Data.isEmpty) return Uint8List(0);
-    return Uint8List.fromList(base64.decode(base64Data));
-  }
-  return Uint8List(0);
-}
-
-String _bytesToBase58(Uint8List bytes) {
-  return Ed25519HDPublicKey(bytes.toList()).toBase58();
-}
-
-double _decodeRustDecimal(List<int> bytes) {
-  final int scale = bytes[2];
-  if (scale < 1 || scale > 28) return 0.0;
-
-  BigInt rawValue = BigInt.zero;
-  for (int i = 4; i < 16; i++) {
-    rawValue |= BigInt.from(bytes[i]) << (8 * (i - 4));
-  }
-  if (rawValue == BigInt.zero) return 0.0;
-
-  final BigInt divisor = BigInt.from(10).pow(scale);
-  return rawValue.toDouble() / divisor.toDouble();
 }

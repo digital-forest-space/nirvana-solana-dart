@@ -54,7 +54,6 @@ class NavTokenMarket {
   final String mayflowerMarket;
   final String marketMetadata;
   final String marketGroup;
-  final String lookupTable;
   final String marketSolVault;
   final String marketNavVault;
   final String feeVault;
@@ -71,7 +70,6 @@ class NavTokenMarket {
     required this.mayflowerMarket,
     required this.marketMetadata,
     required this.marketGroup,
-    required this.lookupTable,
     required this.marketSolVault,
     required this.marketNavVault,
     required this.feeVault,
@@ -91,7 +89,6 @@ class NavTokenMarket {
       mayflowerMarket: 'A5M1nWfi6ATSamEJ1ASr2FC87BMwijthTbNRYG7BhYSc',
       marketMetadata: 'DotD4dZAyr4Kb6AD3RHid8VgmsHUzWF6LRd4WvAMezRj',
       marketGroup: 'Lmdgb4NE4T3ubmQZQZQZ7t4UP6A98NdVbmZPcoEdkdC',
-      lookupTable: 'HeTHfJCgHxpb1snGC5mk8M7bzs99kYAeMBuk9qHd3tMd',
       marketSolVault: '43vPhZeow3pgYa6zrPXASVQhdXTMfowyfNK87BYizhnL',
       marketNavVault: 'BCYzijbWwmqRnsTWjGhHbneST2emQY36WcRAkbkhsQMt',
       feeVault: 'B8jccpiKZjapgfw1ay6EH3pPnxqTmimsm2KsTZ9LSmjf',
@@ -112,7 +109,6 @@ class NavTokenMarket {
       mayflowerMarket: '9SBSQvx5B8tKRgtYa3tyXeyvL3JMAZiA2JVXWzDnFKig',
       marketMetadata: 'HcGpdC8EtNpZPComvRaXDQtGHLpCFXMqfzRYeRSPCT5L',
       marketGroup: 'BfGgpGGyMFfZDYyXqjyPU4YG6Py5kkD93mUGXT7TxGnf',
-      lookupTable: '', // TODO: Discover from interception
       marketSolVault: 'GreFb71nqhudTo5iYBUa8Czgb9ACCUuTDYpm98XdLUwk',
       marketNavVault: 'CfE1xoGPJSmppr9N7ysTGq3tca5Xc22RbsbZycir1tVq',
       feeVault: 'GPpY9M9XraDsbGBpTqtnoQJugktgMDBjGM6UxdQoD3UM',
@@ -133,7 +129,6 @@ class NavTokenMarket {
       mayflowerMarket: '3WNH5EArcmVDJzi4KtaX75WiSY65mqT735GEEvqnFJ6B',
       marketMetadata: 'rQL153FrAAcepv1exoemsf9WEsC2uJaajBaaWCykvnK',
       marketGroup: 'AXJJT2A7pUAzFKaRWzGgSN9fr9sEvKdGiqbJjdyYQbqj',
-      lookupTable: '', // TODO: Discover from interception
       marketSolVault: 'DH1tmXZ2sDe24o4JA6KPELt8G9nk8PfZHP6zfvAxZivM',
       marketNavVault: '2kfQBRonDGXQfo1WkohTbTq55k6RcuYsfEDzXBozvR5X',
       feeVault: 'JCbzDUCn5aLiE6rvvvy5hZoYv3cJzkYFmr35A4SZxzyW',
@@ -154,7 +149,6 @@ class NavTokenMarket {
       mayflowerMarket: '3AwyQgXuhQAFzMaw17V42EW2htwZknr11grEGddvZEUh',
       marketMetadata: 'XAJvRwx5PmCgCYjsKMSoSrL6MZXJtWC6dwgndFvE1uu',
       marketGroup: '72ECyHwnmmRCMrm2BuTKVgLdPSKHhDx5sNGFDYDwN8ym',
-      lookupTable: '', // TODO: Discover from interception
       marketSolVault: 'FpENWfyotJxhAFSsowsSERaEbWMrSopHBAgyGamrvg1a',
       marketNavVault: '6GAADZA83t5Uzk6fwZ55zisfGJ7TFPbnWTRxfLYDF6JM',
       feeVault: '8XQi1aojXMgU4FEfvZmtytQjLAzi7Qyx3theFdCwhfhb',
@@ -179,4 +173,20 @@ class NavTokenMarket {
   /// Returns all available market keys.
   static List<String> get availableMarkets =>
       all.values.map((m) => m.name).toList();
+
+  /// Well-known mint addresses to human-readable names.
+  /// Used by [SamsaraClient.discoverMarkets] to assign names to discovered
+  /// markets without requiring Metaplex metadata lookups.
+  static const wellKnownMints = <String, ({String name, String symbol})>{
+    // Base mints
+    'So11111111111111111111111111111111111111112': (name: 'Wrapped SOL', symbol: 'SOL'),
+    'A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS': (name: 'Zcash', symbol: 'ZEC'),
+    'cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij': (name: 'Coinbase Wrapped BTC', symbol: 'cbBTC'),
+    '7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs': (name: 'Wrapped Ether', symbol: 'WETH'),
+    // Nav mints
+    'navSnrYJkCxMiyhM3F7K889X1u8JFLVHHLxiyo6Jjqo': (name: 'navSOL', symbol: 'navSOL'),
+    'navZyeDnqgHBJQjHX8Kk7ZEzwFgDXxVJBcsAXd76gVe': (name: 'navZEC', symbol: 'navZEC'),
+    'navB4nQ2ENP18CCo1Jqw9bbLncLBC389Rf3XRCQ6zau': (name: 'navCBBTC', symbol: 'navCBBTC'),
+    'navEgA7saxpNqKcnJcWbCeCFMhSQtN8hQWQkK4h9scH': (name: 'navETH', symbol: 'navETH'),
+  };
 }
