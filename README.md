@@ -136,6 +136,8 @@ final client = SamsaraClient.fromRpcClient(rpcClient);
 | `getClaimableRewardsViaSimulation({userPubkey, market})` | `Future<double>` | Claimable prANA revenue via tx simulation |
 | `fetchLatestNavTokenPrice(market, {afterSignature?, ...})` | `Future<TransactionPriceResult>` | Latest navToken price from buy/sell txns |
 | `fetchLatestNavTokenPriceWithPaging(market, {afterSignature?, ...})` | `Future<TransactionPriceResult>` | Same with automatic multi-page scanning |
+| `fetchBorrowCapacity({userPubkey, market})` | `Future<Map<String, double>?>` | Borrow capacity: deposited, debt, limit, available (1 batched RPC call) |
+| `estimateBorrowCapacityAfterBuy({inputBaseAmount, marketPrice, floorPrice})` | `Map<String, double>` | **Static.** Estimate navTokens received and max borrow from a buy (no RPC) |
 
 #### Unsigned Transaction Builders
 
@@ -148,6 +150,7 @@ All return `Future<Uint8List>` — serialized tx bytes for external signing.
 | `buildUnsignedDepositNavTokenTransaction` | `userPubkey, market, depositLamports, recentBlockhash, computeUnitLimit?, computeUnitPrice?` | Deposit navToken into personal position escrow |
 | `buildUnsignedWithdrawNavTokenTransaction` | `userPubkey, market, withdrawLamports, recentBlockhash, computeUnitLimit?, computeUnitPrice?` | Withdraw navToken from personal position escrow |
 | `buildUnsignedBorrowTransaction` | `userPubkey, market, borrowLamports, recentBlockhash, computeUnitLimit?, computeUnitPrice?` | Borrow base token against deposited navToken |
+| `buildUnsignedBuyAndBorrowTransaction` | `userPubkey, market, inputLamports, borrowLamports, recentBlockhash, minOutputLamports?, computeUnitLimit?, computeUnitPrice?` | Atomic buy navToken + borrow base token in a single tx |
 | `buildUnsignedRepayTransaction` | `userPubkey, market, repayLamports, recentBlockhash, computeUnitLimit?, computeUnitPrice?` | Repay borrowed base token |
 | `buildUnsignedDepositPranaTransaction` | `userPubkey, market, pranaAmount, recentBlockhash` | Deposit prANA to market governance account (auto-inits govAccount) |
 | `buildUnsignedClaimRewardsTransaction` | `userPubkey, market, recentBlockhash, computeUnitLimit?, computeUnitPrice?` | Claim prANA revenue (paid in base token) |
@@ -202,6 +205,7 @@ See [docs/samsara/pda_seeds.md](docs/samsara/pda_seeds.md) for full seed referen
 | `scripts/samsara/deposit_nav.dart` | `dart scripts/samsara/deposit_nav.dart <keypair> <amount> [--market navSOL]` |
 | `scripts/samsara/withdraw_nav.dart` | `dart scripts/samsara/withdraw_nav.dart <keypair> <amount> [--market navSOL]` |
 | `scripts/samsara/borrow.dart` | `dart scripts/samsara/borrow.dart <keypair> <amount> [--market navSOL]` |
+| `scripts/samsara/buy_and_borrow.dart` | `dart scripts/samsara/buy_and_borrow.dart <keypair> <buy_amount> [--market navSOL]` |
 | `scripts/samsara/repay.dart` | `dart scripts/samsara/repay.dart <keypair> <amount> [--market navSOL]` |
 | `scripts/samsara/deposit_prana.dart` | `dart scripts/samsara/deposit_prana.dart <keypair> <amount> --market navSOL` |
 | `scripts/samsara/claim_rewards.dart` | `dart scripts/samsara/claim_rewards.dart <keypair> --market navSOL` |

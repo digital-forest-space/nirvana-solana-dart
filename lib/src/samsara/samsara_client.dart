@@ -411,6 +411,31 @@ class SamsaraClient {
     return postBalance / _pow10(market.baseDecimals);
   }
 
+  /// Parses deposited navToken shares from a PersonalPosition's raw account data.
+  ///
+  /// PersonalPosition layout: u64 at byte offset 104.
+  /// Returns 0.0 if the account is null or data is missing/too short.
+  static double _parsePersonalPositionShares(
+      Map<String, dynamic>? account, int navDecimals) {
+    if (account == null || account['data'] == null) return 0.0;
+
+    final dataArray = account['data'] as List<dynamic>?;
+    if (dataArray == null || dataArray.isEmpty) return 0.0;
+
+    final base64Data = dataArray[0] as String?;
+    if (base64Data == null || base64Data.isEmpty) return 0.0;
+
+    final bytes = base64Decode(base64Data);
+    if (bytes.length < 112) return 0.0;
+
+    // Read shares u64 at offset 104
+    final byteData = ByteData.sublistView(
+        Uint8List.fromList(bytes), 104, 112);
+    final sharesLamports = byteData.getUint64(0, Endian.little);
+
+    return sharesLamports / _pow10(navDecimals);
+  }
+
   /// Parses borrow debt from a PersonalPosition's raw account data.
   ///
   /// PersonalPosition layout (~120 bytes, Mayflower program):
@@ -524,6 +549,79 @@ class SamsaraClient {
           _parseFloorPriceFromAccount(accounts[i], markets[i]);
     }
     return results;
+  }
+
+  /// Fetches the user's borrow capacity for a navToken market.
+  ///
+  /// Reads the on-chain PersonalPosition (deposited navToken shares + current
+  /// debt) and the market's floor price to compute the borrow limit.
+  ///
+  /// Max borrow = deposited navTokens * floor price (100% LTV against floor).
+  ///
+  /// Returns `{'deposited': ..., 'debt': ..., 'limit': ..., 'available': ...}`
+  /// in base token units (e.g., SOL). Returns null if the user has no position.
+  Future<Map<String, double>?> fetchBorrowCapacity({
+    required String userPubkey,
+    required NavTokenMarket market,
+  }) async {
+    final mayflowerPda = MayflowerPda(
+        Ed25519HDPublicKey.fromBase58(_config.mayflowerProgramId));
+
+    // Derive personal position PDA
+    final marketMetaKey =
+        Ed25519HDPublicKey.fromBase58(market.marketMetadata);
+    final ownerKey = Ed25519HDPublicKey.fromBase58(userPubkey);
+    final personalPositionKey = await mayflowerPda.personalPosition(
+        marketMeta: marketMetaKey, owner: ownerKey);
+
+    // Batch-fetch personal position + mayflower market in one RPC call
+    final accounts = await _rpcClient.getMultipleAccounts(
+        [personalPositionKey.toBase58(), market.mayflowerMarket]);
+
+    final positionAccount = accounts[0];
+    if (positionAccount == null || positionAccount['data'] == null) {
+      return null;
+    }
+
+    // Parse deposited shares (u64 at offset 104) and debt (u64 at offset 112)
+    final deposited = _parsePersonalPositionShares(
+        positionAccount, market.navDecimals);
+    final debt = _parsePersonalPositionDebt(
+        positionAccount, market.baseDecimals);
+
+    // Parse floor price from market account
+    final floorPrice = _parseFloorPriceFromAccount(accounts[1], market);
+
+    final limit = deposited * floorPrice;
+    final available = limit > debt ? limit - debt : 0.0;
+
+    return {
+      'deposited': deposited,
+      'debt': debt,
+      'limit': limit,
+      'available': available,
+    };
+  }
+
+  /// Estimates the borrow capacity from a buy, without making any RPC calls.
+  ///
+  /// Buy gives navTokens at market price, borrow limit uses floor price:
+  ///   navTokens = inputBaseAmount / marketPrice
+  ///   maxBorrow = navTokens * floorPrice
+  ///
+  /// All amounts are in human-readable units (e.g., 1.5 SOL, not lamports).
+  static Map<String, double> estimateBorrowCapacityAfterBuy({
+    required double inputBaseAmount,
+    required double marketPrice,
+    required double floorPrice,
+  }) {
+    final estimatedNavTokens = inputBaseAmount / marketPrice;
+    final borrowLimit = estimatedNavTokens * floorPrice;
+
+    return {
+      'estimatedNavTokens': estimatedNavTokens,
+      'borrowLimit': borrowLimit,
+    };
   }
 
   /// Discovers all navToken markets from on-chain Mayflower program data.
@@ -1369,6 +1467,152 @@ class SamsaraClient {
         compiledMessage: compiledMessage, signatures: [signature]);
     return Uint8List.fromList(signedTx.toByteArray().toList());
   }
+  /// Build an unsigned atomic buy + borrow transaction for a Mayflower market.
+  ///
+  /// Combines buying navToken and borrowing base token into a single
+  /// transaction requiring only one user signature. The buy executes first
+  /// (minting + auto-depositing navToken as collateral), then the borrow
+  /// draws against that collateral.
+  ///
+  /// For native SOL markets, a single wSOL ATA serves both operations:
+  /// buy consumes SOL from it, borrow deposits borrowed SOL back into it,
+  /// and a final CloseAccount unwraps everything to native SOL.
+  ///
+  /// Automatically initializes the personal position if the user hasn't
+  /// interacted with this market before.
+  ///
+  /// Returns serialized transaction bytes ready for wallet signing.
+  Future<Uint8List> buildUnsignedBuyAndBorrowTransaction({
+    required String userPubkey,
+    required NavTokenMarket market,
+    required int inputLamports,
+    required int borrowLamports,
+    required String recentBlockhash,
+    int minOutputLamports = 0,
+    int computeUnitLimit = 600000,
+    int computeUnitPrice = 500000,
+  }) async {
+    final mayflowerPda = MayflowerPda(
+        Ed25519HDPublicKey.fromBase58(_config.mayflowerProgramId));
+    final txBuilder = SamsaraTransactionBuilder(config: _config);
+
+    // 1. Derive user ATAs (base token ATA shared between buy and borrow)
+    final userBaseAta = await _rpcClient.getAssociatedTokenAddress(
+        userPubkey, market.baseMint);
+    final userNavAta = await _rpcClient.getAssociatedTokenAddress(
+        userPubkey, market.navMint);
+
+    // 2. Derive Mayflower PDAs
+    final marketMetaKey =
+        Ed25519HDPublicKey.fromBase58(market.marketMetadata);
+    final ownerKey = Ed25519HDPublicKey.fromBase58(userPubkey);
+    final personalPositionKey = await mayflowerPda.personalPosition(
+        marketMeta: marketMetaKey, owner: ownerKey);
+    final userSharesKey = await mayflowerPda.personalPositionEscrow(
+        personalPosition: personalPositionKey);
+    final logAccount = (await mayflowerPda.logAccount()).toBase58();
+
+    final personalPosition = personalPositionKey.toBase58();
+    final userShares = userSharesKey.toBase58();
+
+    // 3. Check if personal position exists on-chain
+    final positionInfo =
+        await _rpcClient.getAccountInfo(personalPosition);
+    final needsInit =
+        positionInfo.isEmpty || positionInfo['data'] == null;
+
+    final isNativeSol = market.baseMint == _nativeSolMint;
+
+    // 4. Build combined instruction list
+    final instructions = <Instruction>[
+      txBuilder.buildSetComputeUnitLimitInstruction(computeUnitLimit),
+      txBuilder.buildSetComputeUnitPriceInstruction(computeUnitPrice),
+
+      // Create base token ATA (idempotent) — shared between buy and borrow
+      txBuilder.buildCreateAtaIdempotentInstruction(
+        payer: userPubkey,
+        associatedTokenAccount: userBaseAta,
+        owner: userPubkey,
+        mint: market.baseMint,
+      ),
+    ];
+
+    if (isNativeSol) {
+      // Wrap SOL for buy input
+      instructions.addAll([
+        txBuilder.buildTransferInstruction(
+          from: userPubkey,
+          to: userBaseAta,
+          lamports: inputLamports,
+        ),
+        txBuilder.buildSyncNativeInstruction(userBaseAta),
+      ]);
+    }
+
+    // Create navToken ATA (idempotent)
+    instructions.add(txBuilder.buildCreateAtaIdempotentInstruction(
+      payer: userPubkey,
+      associatedTokenAccount: userNavAta,
+      owner: userPubkey,
+      mint: market.navMint,
+    ));
+
+    // Init personal position if first-time user
+    if (needsInit) {
+      instructions.add(txBuilder.buildInitPositionInstruction(
+        userPubkey: userPubkey,
+        personalPosition: personalPosition,
+        userShares: userShares,
+        logAccount: logAccount,
+        market: market,
+      ));
+    }
+
+    // Buy navToken (takes base token, mints + auto-deposits navToken)
+    instructions.add(txBuilder.buildBuyNavSolInstruction(
+      userPubkey: userPubkey,
+      userWsolAccount: userBaseAta,
+      userNavSolAccount: userNavAta,
+      personalPosition: personalPosition,
+      userShares: userShares,
+      logAccount: logAccount,
+      market: market,
+      inputLamports: inputLamports,
+      minOutputLamports: minOutputLamports,
+    ));
+
+    // Borrow base token against deposited navToken collateral
+    instructions.add(txBuilder.buildBorrowInstruction(
+      userPubkey: userPubkey,
+      userBaseTokenAccount: userBaseAta,
+      personalPosition: personalPosition,
+      logAccount: logAccount,
+      market: market,
+      borrowLamports: borrowLamports,
+    ));
+
+    if (isNativeSol) {
+      // Close wSOL account (unwrap buy dust + borrowed SOL to native)
+      instructions.add(txBuilder.buildCloseAccountInstruction(
+        account: userBaseAta,
+        destination: userPubkey,
+        owner: userPubkey,
+      ));
+    }
+
+    // 5. Compile and return unsigned tx
+    final message = Message(instructions: instructions);
+    final feePayer = Ed25519HDPublicKey.fromBase58(userPubkey);
+    final compiledMessage = message.compile(
+      recentBlockhash: recentBlockhash,
+      feePayer: feePayer,
+    );
+    final signature = Signature(List.filled(64, 0), publicKey: feePayer);
+    final signedTx = SignedTx(
+        compiledMessage: compiledMessage, signatures: [signature]);
+    return Uint8List.fromList(signedTx.toByteArray().toList());
+  }
+
   /// Build an unsigned deposit navToken transaction for a Mayflower market.
   ///
   /// Deposits navToken (e.g., navSOL) from the user's wallet ATA into the
