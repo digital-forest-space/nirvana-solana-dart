@@ -5,6 +5,7 @@ import 'package:solana/solana.dart';
 import 'package:nirvana_solana/src/samsara/config.dart';
 import 'package:nirvana_solana/src/samsara/samsara_client.dart';
 import 'package:nirvana_solana/src/rpc/solana_rpc_client.dart';
+import 'package:nirvana_solana/src/models/transaction_price_result.dart';
 
 /// Fetch the latest navToken price and floor price for Samsara markets.
 ///
@@ -69,16 +70,19 @@ void main(List<String> args) async {
   final client = SamsaraClient(rpcClient: rpcClient);
 
   try {
-    // Fetch floor prices in one batched RPC call, market prices in parallel
-    final floorPricesFuture = client.fetchAllFloorPrices(markets: markets);
-    final priceFutures = markets.map((market) =>
-      client.fetchLatestNavTokenPriceWithPaging(
-        market,
+    // Fetch floor prices in one batched RPC call
+    final floorPrices = await client.fetchAllFloorPrices(markets: markets);
+
+    // Fetch market prices sequentially to avoid 429 rate limits on public RPCs
+    final priceResults = <TransactionPriceResult>[];
+    for (var i = 0; i < markets.length; i++) {
+      if (i > 0) await Future.delayed(const Duration(milliseconds: 400));
+      priceResults.add(await client.fetchLatestNavTokenPriceWithPaging(
+        markets[i],
         pageSize: 10,
         initialDelayMs: 200,
-      )).toList();
-    final priceResults = await Future.wait(priceFutures);
-    final floorPrices = await floorPricesFuture;
+      ));
+    }
 
     final resultList = <Map<String, dynamic>>[];
     for (var i = 0; i < markets.length; i++) {
