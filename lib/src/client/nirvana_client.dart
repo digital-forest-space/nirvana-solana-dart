@@ -88,6 +88,37 @@ class NirvanaClient {
     return _decodeFloorPriceFromPriceCurve(priceCurveData);
   }
 
+  /// Fetches all 5 governance-controlled fees from the Nirvana tenant account.
+  ///
+  /// Reads the tenant account and parses 5 consecutive u64 fee values
+  /// (in milli-basis-points, where 10,000 mbps = 1%) starting at offset 561.
+  ///
+  /// Returns null if the tenant account cannot be read.
+  Future<NirvanaFees?> fetchNirvanaFees() async {
+    final tenantBytes = await _fetchTenantAccountData();
+    return _parseTenantFees(tenantBytes);
+  }
+
+  /// Parses the 5 fee fields from tenant account data.
+  ///
+  /// Tenant fee layout (5 × u64 little-endian, 8-byte stride):
+  ///   offset 561: feeRealizePranaMbps
+  ///   offset 569: feeBuyAnaMbps
+  ///   offset 577: feeSellAnaMbps
+  ///   offset 585: feeBorrowNirvMbps
+  ///   offset 593: feeWithdrawAnaMbps
+  static NirvanaFees? _parseTenantFees(Uint8List bytes) {
+    if (bytes.length < 601) return null;
+    final bd = ByteData.sublistView(bytes);
+    return NirvanaFees(
+      realizePranaMbps: bd.getUint64(561, Endian.little),
+      buyAnaMbps: bd.getUint64(569, Endian.little),
+      sellAnaMbps: bd.getUint64(577, Endian.little),
+      borrowNirvMbps: bd.getUint64(585, Endian.little),
+      withdrawAnaMbps: bd.getUint64(593, Endian.little),
+    );
+  }
+
   /// Fetches the latest ANA price from a recent buy/sell transaction
   ///
   /// [afterSignature] - Only check signatures newer than this (exclusive).
@@ -770,8 +801,9 @@ class NirvanaClient {
   }
 
   double _readSellFeeRatio(Uint8List tenantBytes) {
-    // Offset 585 contains the total sell fee (8953 Mbps = 0.8953%)
-    // This includes both the ANA fee portion and USDC adjustment
+    // NOTE: Offset 585 is actually feeBorrowNirvMbps, not feeSellAnaMbps
+    // (sell fee is at offset 577). Kept as-is to preserve existing price
+    // calculation behavior. See fetchNirvanaFees() for correct fee offsets.
     const int sellFeeMbpsOffset = 585;
 
     final int sellFeeMbps = _bytesToUint64(
@@ -2587,4 +2619,56 @@ class _PriceData {
     required this.anaFloor,
     required this.prana,
   });
+}
+
+/// Nirvana V2 protocol fee schedule read from the on-chain tenant account.
+///
+/// All values are in milli-basis-points (mbps), where 10,000 mbps = 1%.
+/// These are global fees (not per-market) controlled by prANA governance voting.
+class NirvanaFees {
+  final int realizePranaMbps;
+  final int buyAnaMbps;
+  final int sellAnaMbps;
+  final int borrowNirvMbps;
+  final int withdrawAnaMbps;
+
+  const NirvanaFees({
+    required this.realizePranaMbps,
+    required this.buyAnaMbps,
+    required this.sellAnaMbps,
+    required this.borrowNirvMbps,
+    required this.withdrawAnaMbps,
+  });
+
+  /// Realize prANA fee as a percentage (e.g., 0.116 for 0.116%).
+  double get realizePranaPercent => realizePranaMbps / 10000.0;
+
+  /// Buy ANA fee as a percentage.
+  double get buyAnaPercent => buyAnaMbps / 10000.0;
+
+  /// Sell ANA fee as a percentage.
+  double get sellAnaPercent => sellAnaMbps / 10000.0;
+
+  /// Borrow NIRV fee as a percentage.
+  double get borrowNirvPercent => borrowNirvMbps / 10000.0;
+
+  /// Withdraw ANA fee as a percentage.
+  double get withdrawAnaPercent => withdrawAnaMbps / 10000.0;
+
+  /// Buy ANA fee as a ratio (e.g., 0.00262 for 0.262%).
+  double get buyAnaRatio => buyAnaMbps / 1000000.0;
+
+  /// Sell ANA fee as a ratio.
+  double get sellAnaRatio => sellAnaMbps / 1000000.0;
+
+  /// Borrow NIRV fee as a ratio.
+  double get borrowNirvRatio => borrowNirvMbps / 1000000.0;
+
+  @override
+  String toString() =>
+      'NirvanaFees(buy=${buyAnaPercent.toStringAsFixed(3)}%, '
+      'sell=${sellAnaPercent.toStringAsFixed(3)}%, '
+      'withdraw=${withdrawAnaPercent.toStringAsFixed(3)}%, '
+      'borrow=${borrowNirvPercent.toStringAsFixed(3)}%, '
+      'realizePrana=${realizePranaPercent.toStringAsFixed(3)}%)';
 }
