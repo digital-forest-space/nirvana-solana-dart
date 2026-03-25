@@ -741,6 +741,181 @@ class SamsaraClient {
     return markets;
   }
 
+  /// Fetches the on-chain fee schedule for a single market.
+  ///
+  /// Reads the MarketGroup account (154 bytes, owned by Mayflower) and parses
+  /// the fee fields stored as u32 little-endian values in micro-basis-points.
+  ///
+  /// Returns null if the MarketGroup account cannot be read.
+  Future<MarketFees?> fetchMarketFees(NavTokenMarket market) async {
+    final info = await _rpcClient.getAccountInfo(market.marketGroup);
+    if (info.isEmpty) return null;
+    final bytes = _decodeAccountData(info);
+    return _parseMarketGroupFees(bytes, market.name);
+  }
+
+  /// Fetches fees for all provided markets in a single batched RPC call.
+  ///
+  /// Returns a map from market name to [MarketFees]. Markets whose
+  /// MarketGroup account could not be read are omitted from the result.
+  Future<Map<String, MarketFees>> fetchAllMarketFees(
+    List<NavTokenMarket> markets, {
+    int batchSize = 100,
+  }) async {
+    final addresses = markets.map((m) => m.marketGroup).toList();
+    final accounts =
+        await _rpcClient.getMultipleAccounts(addresses, batchSize: batchSize);
+
+    final result = <String, MarketFees>{};
+    for (var i = 0; i < markets.length; i++) {
+      final account = accounts[i];
+      if (account == null) continue;
+      final bytes = _decodeAccountData(account);
+      final fees = _parseMarketGroupFees(bytes, markets[i].name);
+      if (fees != null) {
+        result[markets[i].name] = fees;
+      }
+    }
+    return result;
+  }
+
+  /// Parses fee fields from a MarketGroup account's raw bytes.
+  ///
+  /// MarketGroup layout (154 bytes):
+  ///   0-7:     discriminator
+  ///   8-103:   3 × Pubkey (tenant, samsaraMarket, unknown)
+  ///   104-105: u16 (unknown)
+  ///   106-109: u32 buy fee (ubps)
+  ///   110-113: u32 sell fee (ubps)
+  ///   114-117: u32 borrow fee (ubps)
+  ///   118-121: u32 exercise option fee (ubps)
+  ///   122-153: reserved
+  static MarketFees? _parseMarketGroupFees(Uint8List bytes, String name) {
+    if (bytes.length < 122) return null;
+    final bd = ByteData.sublistView(bytes);
+    return MarketFees(
+      marketName: name,
+      buyFeeUbps: bd.getUint32(106, Endian.little),
+      sellFeeUbps: bd.getUint32(110, Endian.little),
+      borrowFeeUbps: bd.getUint32(114, Endian.little),
+      exerciseOptionFeeUbps: bd.getUint32(118, Endian.little),
+    );
+  }
+
+  /// Fetches all governance parameters for a single market.
+  ///
+  /// Reads the SamsaraMarket account (876 bytes) which contains 7 governance
+  /// parameter blocks (fees + floor-raise settings), each 32 bytes at
+  /// offset 152 with 32-byte stride. Also reads the MarketGroup account for
+  /// the exercise option fee.
+  ///
+  /// Returns null if the SamsaraMarket account cannot be read.
+  Future<MarketGovernance?> fetchMarketGovernance(
+      NavTokenMarket market) async {
+    final accounts = await _rpcClient.getMultipleAccounts(
+        [market.samsaraMarket, market.marketGroup]);
+
+    final samsaraBytes =
+        accounts[0] != null ? _decodeAccountData(accounts[0]) : null;
+    if (samsaraBytes == null || samsaraBytes.length < 376) return null;
+
+    // Exercise option fee from MarketGroup (offset 118, u32)
+    var exerciseUbps = 0;
+    if (accounts[1] != null) {
+      final mgBytes = _decodeAccountData(accounts[1]);
+      if (mgBytes.length >= 122) {
+        exerciseUbps = ByteData.sublistView(mgBytes)
+            .getUint32(118, Endian.little);
+      }
+    }
+
+    return _parseSamsaraMarketGovernance(
+        samsaraBytes, market.name, exerciseUbps);
+  }
+
+  /// Fetches governance parameters for all provided markets in a single batch.
+  ///
+  /// Returns a map from market name to [MarketGovernance]. Markets whose
+  /// accounts could not be read are omitted.
+  Future<Map<String, MarketGovernance>> fetchAllMarketGovernance(
+    List<NavTokenMarket> markets, {
+    int batchSize = 100,
+  }) async {
+    // Interleave SamsaraMarket + MarketGroup addresses for batch fetch
+    final addresses = <String>[];
+    for (final m in markets) {
+      addresses.add(m.samsaraMarket);
+      addresses.add(m.marketGroup);
+    }
+
+    final accounts =
+        await _rpcClient.getMultipleAccounts(addresses, batchSize: batchSize);
+
+    final result = <String, MarketGovernance>{};
+    for (var i = 0; i < markets.length; i++) {
+      final samsaraAccount = accounts[i * 2];
+      final mgAccount = accounts[i * 2 + 1];
+
+      if (samsaraAccount == null) continue;
+      final samsaraBytes = _decodeAccountData(samsaraAccount);
+      if (samsaraBytes.length < 376) continue;
+
+      var exerciseUbps = 0;
+      if (mgAccount != null) {
+        final mgBytes = _decodeAccountData(mgAccount);
+        if (mgBytes.length >= 122) {
+          exerciseUbps = ByteData.sublistView(mgBytes)
+              .getUint32(118, Endian.little);
+        }
+      }
+
+      final gov = _parseSamsaraMarketGovernance(
+          samsaraBytes, markets[i].name, exerciseUbps);
+      if (gov != null) {
+        result[markets[i].name] = gov;
+      }
+    }
+    return result;
+  }
+
+  /// Parses a single governance parameter block (32 bytes) from account data.
+  static GovernanceParam _parseGovParam(ByteData bd, int offset) {
+    return GovernanceParam(
+      previous: bd.getUint32(offset, Endian.little),
+      current: bd.getUint32(offset + 4, Endian.little),
+      step: bd.getUint32(offset + 8, Endian.little),
+      maximum: bd.getUint32(offset + 12, Endian.little),
+      minimum: bd.getUint32(offset + 16, Endian.little),
+    );
+  }
+
+  /// Parses all 7 governance parameter blocks from a SamsaraMarket account.
+  ///
+  /// SamsaraMarket governance layout (32-byte blocks):
+  ///   offset 152: Buy Fee
+  ///   offset 184: Sell Fee
+  ///   offset 216: Borrow Fee
+  ///   offset 248: Floor Raise Cooldown (seconds)
+  ///   offset 280: Floor Raise Buffer (ubps)
+  ///   offset 312: Floor Investment (ubps)
+  ///   offset 344: Floor Raise Increase Ratio (ubps)
+  static MarketGovernance? _parseSamsaraMarketGovernance(
+      Uint8List bytes, String name, int exerciseOptionFeeUbps) {
+    if (bytes.length < 376) return null;
+    final bd = ByteData.sublistView(bytes);
+    return MarketGovernance(
+      marketName: name,
+      buyFee: _parseGovParam(bd, 152),
+      sellFee: _parseGovParam(bd, 184),
+      borrowFee: _parseGovParam(bd, 216),
+      floorRaiseCooldown: _parseGovParam(bd, 248),
+      floorRaiseBuffer: _parseGovParam(bd, 280),
+      floorInvestment: _parseGovParam(bd, 312),
+      floorRaiseIncrease: _parseGovParam(bd, 344),
+      exerciseOptionFeeUbps: exerciseOptionFeeUbps,
+    );
+  }
+
   /// Parses SPL Mint decimals (u8 at byte offset 44).
   static int _parseMintDecimals(Map<String, dynamic>? account) {
     if (account == null || account['data'] == null) return 9;
@@ -1959,6 +2134,142 @@ class _MarketSlice {
     required this.govAccountIndex,
     required this.personalPositionIndex,
   });
+}
+
+/// Per-market fee schedule read from the on-chain MarketGroup account.
+///
+/// All fee values are in micro-basis-points (ubps), where 10,000 ubps = 1%.
+/// For example, a buyFeeUbps of 9000 means a 0.9% buy fee.
+class MarketFees {
+  final String marketName;
+  final int buyFeeUbps;
+  final int sellFeeUbps;
+  final int borrowFeeUbps;
+  final int exerciseOptionFeeUbps;
+
+  const MarketFees({
+    required this.marketName,
+    required this.buyFeeUbps,
+    required this.sellFeeUbps,
+    required this.borrowFeeUbps,
+    required this.exerciseOptionFeeUbps,
+  });
+
+  /// Buy fee as a percentage (e.g., 0.9 for 0.9%).
+  double get buyFeePercent => buyFeeUbps / 10000.0;
+
+  /// Sell fee as a percentage.
+  double get sellFeePercent => sellFeeUbps / 10000.0;
+
+  /// Borrow fee as a percentage.
+  double get borrowFeePercent => borrowFeeUbps / 10000.0;
+
+  /// Exercise option fee as a percentage.
+  double get exerciseOptionFeePercent => exerciseOptionFeeUbps / 10000.0;
+
+  /// Buy fee as a ratio (e.g., 0.009 for 0.9%).
+  double get buyFeeRatio => buyFeeUbps / 1000000.0;
+
+  /// Sell fee as a ratio.
+  double get sellFeeRatio => sellFeeUbps / 1000000.0;
+
+  /// Borrow fee as a ratio.
+  double get borrowFeeRatio => borrowFeeUbps / 1000000.0;
+
+  @override
+  String toString() =>
+      'MarketFees($marketName: buy=${buyFeePercent.toStringAsFixed(2)}%, '
+      'sell=${sellFeePercent.toStringAsFixed(2)}%, '
+      'borrow=${borrowFeePercent.toStringAsFixed(2)}%, '
+      'exerciseOption=${exerciseOptionFeePercent.toStringAsFixed(2)}%)';
+}
+
+/// Full per-market governance parameters read from the SamsaraMarket account.
+///
+/// Contains all governance-controlled parameters including fees, floor-raise
+/// settings, and their vote metadata. Each parameter is stored in a 32-byte
+/// block in the SamsaraMarket account (876 bytes, Samsara program-owned).
+///
+/// Fee values are in ubps (10,000 = 1%). Floor raise cooldown is in seconds.
+/// Floor raise buffer, investment, and increase ratio are in ubps.
+class MarketGovernance {
+  final String marketName;
+
+  // Fees (ubps)
+  final GovernanceParam buyFee;
+  final GovernanceParam sellFee;
+  final GovernanceParam borrowFee;
+
+  // Floor raise parameters
+  final GovernanceParam floorRaiseCooldown;
+  final GovernanceParam floorRaiseBuffer;
+  final GovernanceParam floorInvestment;
+  final GovernanceParam floorRaiseIncrease;
+
+  // Exercise option fee from MarketGroup (ubps), not governance-voted
+  final int exerciseOptionFeeUbps;
+
+  const MarketGovernance({
+    required this.marketName,
+    required this.buyFee,
+    required this.sellFee,
+    required this.borrowFee,
+    required this.floorRaiseCooldown,
+    required this.floorRaiseBuffer,
+    required this.floorInvestment,
+    required this.floorRaiseIncrease,
+    this.exerciseOptionFeeUbps = 0,
+  });
+
+  /// Convenience: extract just the fee values as a [MarketFees].
+  MarketFees get fees => MarketFees(
+        marketName: marketName,
+        buyFeeUbps: buyFee.current,
+        sellFeeUbps: sellFee.current,
+        borrowFeeUbps: borrowFee.current,
+        exerciseOptionFeeUbps: exerciseOptionFeeUbps,
+      );
+
+  @override
+  String toString() => 'MarketGovernance($marketName: '
+      'buy=${buyFee.current}, sell=${sellFee.current}, '
+      'borrow=${borrowFee.current}, '
+      'cooldown=${floorRaiseCooldown.current}s, '
+      'buffer=${floorRaiseBuffer.currentPercent.toStringAsFixed(2)}%, '
+      'investment=${floorInvestment.currentPercent.toStringAsFixed(2)}%, '
+      'increase=${floorRaiseIncrease.currentPercent.toStringAsFixed(2)}%)';
+}
+
+/// A single governance-controlled parameter with its current value and bounds.
+///
+/// Stored as a 32-byte block in the SamsaraMarket account:
+///   +0:  u32 previous value (or pending)
+///   +4:  u32 current value
+///   +8:  u32 step size (vote change rate)
+///   +12: u32 maximum
+///   +16: u32 minimum (or step)
+class GovernanceParam {
+  final int previous;
+  final int current;
+  final int step;
+  final int maximum;
+  final int minimum;
+
+  const GovernanceParam({
+    required this.previous,
+    required this.current,
+    required this.step,
+    required this.maximum,
+    required this.minimum,
+  });
+
+  /// Current value as a percentage (for ubps-encoded params, 10000 = 1%).
+  double get currentPercent => current / 10000.0;
+
+  @override
+  String toString() =>
+      'GovernanceParam(current=$current, step=$step, '
+      'min=$minimum, max=$maximum)';
 }
 
 /// Parsed fields from a MarketMeta on-chain account.
